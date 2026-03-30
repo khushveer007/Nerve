@@ -7,14 +7,14 @@ This document is the step-by-step runbook for deploying Nerve on an Ubuntu VPS w
 Commands:
 
 ```bash
-ssh root@173.230.138.42
+ssh root@x.x.x.x
 whoami && hostname && lsb_release -a
 ```
 
 What changed
 - Confirmed the target VPS is Ubuntu `24.04.3 LTS`.
 - Confirmed the deployment source branch is `DB-Integration`.
-- Locked the first public URL to `http://173.230.138.42`.
+- Locked the first public URL to `http://x.x.x.x`.
 
 How to verify
 - `whoami` returns `root`
@@ -71,7 +71,7 @@ nano /srv/nerve/shared/env/.env
 ```
 
 Set at least:
-- `APP_BASE_URL=http://173.230.138.42`
+- `APP_BASE_URL=http://x.x.x.x`
 - `API_PORT=3001`
 - `COOKIE_SECURE=false`
 - `POSTGRES_DB=nerve`
@@ -125,9 +125,9 @@ What changed
 - Added an atomic symlink-based frontend release switch.
 
 How to verify
-- `curl -I http://173.230.138.42`
-- `curl http://173.230.138.42/api/health`
-- Open `http://173.230.138.42/login` in the browser
+- `curl -I http://x.x.x.x`
+- `curl http://x.x.x.x/api/health`
+- Open `http://x.x.x.x/login` in the browser
 
 Rollback steps
 - Point `/srv/nerve/releases/current` back to the previous release directory
