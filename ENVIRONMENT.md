@@ -26,6 +26,27 @@ Local development or build-time variables:
 | --- | --- | --- | --- |
 | `VITE_API_BASE_URL` | Yes | Frontend API base URL | `/api` |
 
+## Local Development
+
+Copy `.env.local.example` to `.env.local` in the repo root for local feature work.
+
+Recommended local values:
+
+| Variable | Required | Purpose | Example |
+| --- | --- | --- | --- |
+| `APP_BASE_URL` | Yes | Browser URL used by the host API | `http://127.0.0.1:8080` |
+| `API_PORT` | Yes | Host API port for `npm run dev:server` | `3001` |
+| `DATABASE_URL` | Yes | Host connection string to the Docker PostgreSQL container | `postgres://nerve_app:password@127.0.0.1:5432/nerve` |
+| `POSTGRES_DATA_DIR` | Yes | Local persistent PostgreSQL data path | `./.local/postgres-data` |
+| `SUPER_ADMIN_EMAIL` | Yes | Seeded local super-admin login email | `super@parul.ac.in` |
+| `SUPER_ADMIN_PASSWORD` | Yes | Seeded local super-admin login password | strong temporary password |
+
+Local dev entrypoint:
+
+```bash
+npm run dev:local
+```
+
 ## Secret Handling
 
 What changed

@@ -94,7 +94,7 @@ bash /srv/nerve/app/deploy/scripts/deploy.sh
 ```
 
 What changed
-- Pulls latest `DB-Integration`
+- Pulls the configured deploy source, defaulting to upstream `main`
 - Runs `npm ci`, `lint`, `test`, `build`
 - Rebuilds containers and publishes the new SPA release
 
@@ -105,3 +105,23 @@ How to verify
 Rollback steps
 - Point `/srv/nerve/releases/current` to the previous release
 - Redeploy the previous git commit if the API schema changed
+
+## Local Feature Testing
+
+```bash
+cp .env.local.example .env.local
+npm run dev:local
+```
+
+What changed
+- Starts the local PostgreSQL container with the dev override compose file
+- Runs the API watcher and Vite dev server against the current checkout
+- Uses `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` from `.env.local` for login
+
+How to verify
+- `curl http://127.0.0.1:3001/api/health`
+- Open `http://127.0.0.1:8080/login`
+
+Rollback steps
+- Stop the script with `Ctrl+C`
+- If the local stack is still listed, remove it with `docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.local down`
