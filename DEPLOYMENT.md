@@ -13,7 +13,7 @@ whoami && hostname && lsb_release -a
 
 What changed
 - Confirmed the target VPS is Ubuntu `24.04.3 LTS`.
-- Confirmed the deployment source branch is `DB-Integration`.
+- Confirmed the deployment source is `https://github.com/Manju-Bharati-Mahto/Nerve.git` on branch `main`.
 - Locked the first public URL to `http://x.x.x.x`.
 
 How to verify
@@ -65,7 +65,7 @@ Rollback steps
 Copy the repo and env file:
 
 ```bash
-git clone --branch DB-Integration https://github.com/khushveer007/Nerve.git /srv/nerve/app
+git clone --branch main https://github.com/Manju-Bharati-Mahto/Nerve.git /srv/nerve/app
 cp /srv/nerve/app/.env.example /srv/nerve/shared/env/.env
 nano /srv/nerve/shared/env/.env
 ```
@@ -164,3 +164,34 @@ Rollback steps
 - `certbot delete --cert-name your-domain.example`
 - Restore the previous Nginx config and env values
 - Reload Nginx and redeploy
+
+## Local Development
+
+Use the current checkout for feature work and deployment testing instead of pulling into `/srv/nerve/app`.
+
+Commands:
+
+```bash
+cp .env.local.example .env.local
+nano .env.local
+npm run dev:local
+```
+
+Expected ports
+- Frontend: `http://127.0.0.1:8080`
+- API: `http://127.0.0.1:3001`
+- PostgreSQL: `127.0.0.1:5432`
+
+What changed
+- Starts PostgreSQL in Docker using the local override compose file.
+- Runs the API and Vite dev server from the current branch and working tree.
+- Keeps local dev credentials in `.env.local` instead of the VPS shared env path.
+
+How to verify
+- `curl http://127.0.0.1:3001/api/health`
+- Open `http://127.0.0.1:8080/login` in the browser
+- Sign in with the `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` values from `.env.local`
+
+Rollback steps
+- Press `Ctrl+C` in the `npm run dev:local` terminal
+- If needed, run `docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.local down`
