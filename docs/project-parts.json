@@ -1,0 +1,84 @@
+{
+  "project_name": "Nerve",
+  "repository_type": "multi-part",
+  "generated_at": "2026-04-02",
+  "parts": [
+    {
+      "part_id": "web-client",
+      "name": "Web Client",
+      "project_type_id": "web",
+      "root_path": "src",
+      "entry_point": "src/main.tsx",
+      "primary_language": "TypeScript",
+      "tech_stack": [
+        "React 18",
+        "React Router",
+        "Vite",
+        "Tailwind CSS",
+        "Radix UI",
+        "Lucide React"
+      ],
+      "notes": "Hybrid client state. Newer role-specific flows use useAppData() and the REST API, while older generic dashboards still read src/lib/db.ts directly."
+    },
+    {
+      "part_id": "api-server",
+      "name": "API Server",
+      "project_type_id": "backend",
+      "root_path": "server",
+      "entry_point": "server/index.ts",
+      "primary_language": "TypeScript",
+      "tech_stack": [
+        "Express 4",
+        "pg",
+        "express-session",
+        "connect-pg-simple",
+        "Zod",
+        "Node 22"
+      ],
+      "notes": "Bootstraps PostgreSQL tables on startup, seeds default data, and persists sessions in the database."
+    }
+  ],
+  "supporting_assets": [
+    {
+      "name": "Retained Supabase assets",
+      "path": "supabase",
+      "notes": "Contains retained migrations, generated types, and a Deno Edge Function for AI chat/newsletter generation."
+    },
+    {
+      "name": "Deployment automation",
+      "path": "deploy/scripts",
+      "notes": "Contains deploy, backup, restore, and restore-test shell scripts for VPS operations."
+    },
+    {
+      "name": "Nginx configuration",
+      "path": "nginx/nerve.conf",
+      "notes": "Serves the built SPA and proxies /api requests to the Node API."
+    }
+  ],
+  "integration_points": [
+    {
+      "from": "web-client",
+      "to": "api-server",
+      "type": "REST over same-origin /api",
+      "details": "src/lib/api.ts calls /api endpoints. Vite proxies to 127.0.0.1:3001 in development and Nginx proxies /api in production."
+    },
+    {
+      "from": "api-server",
+      "to": "PostgreSQL",
+      "type": "SQL via pg",
+      "details": "server/db.ts creates tables, seeds teams/users/entries, and backs connect-pg-simple session storage."
+    },
+    {
+      "from": "web-client",
+      "to": "retained-supabase",
+      "type": "Planned / retained cloud integration",
+      "details": "src/integrations/supabase/client.ts is stubbed, but generated types, migrations, and Edge Function code remain in source control."
+    },
+    {
+      "from": "retained-supabase",
+      "to": "Anthropic Messages API",
+      "type": "HTTPS streaming request",
+      "details": "supabase/functions/ai-chat/index.ts forwards chat and newsletter prompts when deployed with ANTHROPIC_API_KEY."
+    }
+  ]
+}
