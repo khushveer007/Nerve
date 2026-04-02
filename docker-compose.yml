@@ -34,6 +34,13 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-super@parul.ac.in}
       SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@parul.ac.in}
+    volumes:
+      - ${UPLOADS_DIR:-/srv/nerve/data/uploads}:/app/uploads
     ports:
       - "127.0.0.1:${API_PORT:-3001}:${API_PORT:-3001}"
     networks:
