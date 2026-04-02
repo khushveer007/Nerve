@@ -180,7 +180,7 @@ function ManageCategoriesTab() {
               )}
 
               <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => setExpanded(p => { const s = new Set(p); s.has(cat.id) ? s.delete(cat.id) : s.add(cat.id); return s })}
+                <button onClick={() => setExpanded(p => { const s = new Set(p); if (s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); return s })}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
                   {cat.sub_categories.length} subs
                   {expanded.has(cat.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -433,7 +433,7 @@ function DailyReportsTab({ brandingUsers }: { brandingUsers: { id: string; full_
               {reports.map(r => (
                 <div key={r.id} className="hub-card p-0 overflow-hidden border border-border">
                   <div className="flex items-center gap-3 px-4 py-3 bg-muted/20 border-b border-border cursor-pointer"
-                    onClick={() => setExpanded(p => { const s = new Set(p); s.has(r.id) ? s.delete(r.id) : s.add(r.id); return s })}>
+                    onClick={() => setExpanded(p => { const s = new Set(p); if (s.has(r.id)) s.delete(r.id); else s.add(r.id); return s })}>
                     <div className="w-8 h-8 rounded-full bg-pink-100 flex items-center justify-center shrink-0">
                       <span className="text-xs font-semibold text-pink-700">
                         {(r.user_name || '?')[0].toUpperCase()}
