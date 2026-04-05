@@ -1,6 +1,6 @@
 # Nerve - API Contracts (`api-server`)
 
-**Date:** 2026-04-02
+**Date:** 2026-04-05
 **Part:** `api-server`
 
 ## Overview
@@ -45,8 +45,11 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 | `POST` | `/api/auth/login` | Public | Sign in and create session |
 | `POST` | `/api/auth/logout` | Public | Destroy session |
 | `GET` | `/api/bootstrap` | Session | Fetch entries, users, teams, and optionally branding rows |
+| `GET` | `/api/assistant/health` | Session | Report backend and corpus readiness for the assistant shell |
+| `POST` | `/api/assistant/query` | Session | Search the Phase 1 entry-backed corpus |
 | `GET` | `/api/entries` | Session | List entries |
 | `POST` | `/api/entries` | Session | Create entry |
+| `PATCH` | `/api/entries/:id` | Session | Update entry and trigger reindexing |
 | `DELETE` | `/api/entries/:id` | Session | Delete entry |
 | `GET` | `/api/users` | Session | List users |
 | `POST` | `/api/users` | Session | Create user with role/team restrictions |
@@ -110,6 +113,86 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 ## Entries
 
+## Assistant
+
+### `GET /api/assistant/health`
+
+- **Purpose:** Tell the authenticated assistant workspace whether the backend is healthy and whether the entry corpus is ready or still warming up.
+- **Auth:** Any authenticated user.
+- **Success Response:**
+
+```json
+{
+  "available": true,
+  "title": "Assistant is available.",
+  "description": "Entry-backed search is live with indexed knowledge assets.",
+  "nextStep": "Submit a query to search the Phase 1 entry corpus."
+}
+```
+
+- **Failure Shape:** `{ "message": string }`
+
+### `POST /api/assistant/query`
+
+- **Purpose:** Execute the first production assistant query path over entry-backed `knowledge_*` records.
+- **Auth:** Any authenticated user.
+- **Request Body:**
+
+```json
+{
+  "query": {
+    "mode": "search",
+    "text": "NABH accreditation",
+    "filters": {
+      "departments": [],
+      "entry_types": [],
+      "priorities": [],
+      "tags": []
+    }
+  }
+}
+```
+
+- **Response:**
+
+```json
+{
+  "result": {
+    "mode": "search",
+    "answer": null,
+    "enough_evidence": true,
+    "grounded": false,
+    "citations": [],
+    "results": [
+      {
+        "asset_id": "asset_123",
+        "asset_version_id": "assetver_123",
+        "chunk_id": "chunk_123",
+        "entry_id": "e-001",
+        "title": "Medical College Gets NABH Accreditation",
+        "source_kind": "entry",
+        "media_type": "text",
+        "snippet": "Parul Institute of Medical Sciences and Research has been granted NABH accreditation...",
+        "score": 2.17,
+        "metadata": {
+          "dept": "Medical",
+          "type": "Achievement",
+          "priority": "Key highlight"
+        }
+      }
+    ],
+    "follow_up_suggestions": [
+      "Refine the query with a department or title phrase."
+    ],
+    "request_id": "req_123"
+  }
+}
+```
+
+- **Notes:**
+  - Story 1.2 is intentionally search-first, so `answer` remains `null` and `grounded` remains `false`.
+  - Results are limited to `source_kind = "entry"` in this Phase 1 slice.
+
 ### `GET /api/entries`
 
 - **Purpose:** List all entries ordered by `created_at DESC`.
@@ -145,6 +228,16 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
   - `tags` must be an array of strings
   - `created_by` in the payload is ignored in practice because the handler overwrites it with the current session user id
 - **Success Response:** `{ "entry": Entry }`
+
+### `PATCH /api/entries/:id`
+
+- **Purpose:** Update an existing entry and enqueue a shared reindex job for the RAG layer.
+- **Auth:** Any authenticated user.
+- **Request Body:** any subset of entry-create fields except `created_by`
+- **Success Response:** `{ "entry": Entry }`
+- **Failure Cases:**
+  - `400` for invalid partial payloads
+  - `404` when the entry id does not exist
 
 ### `DELETE /api/entries/:id`
 

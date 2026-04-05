@@ -7,6 +7,7 @@ import type {
   CreateUserInput,
   Entry,
   TeamRecord,
+  UpdateEntryInput,
   UpdateUserInput,
 } from "./app-types";
 
@@ -51,6 +52,11 @@ export const api = {
     request<{ entry: Entry }>("/entries", {
       method: "POST",
       body: JSON.stringify(entry),
+    }),
+  updateEntry: (id: string, patch: UpdateEntryInput) =>
+    request<{ entry: Entry }>(`/entries/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
     }),
   deleteEntry: (id: string) =>
     request<{ ok: boolean }>(`/entries/${id}`, { method: "DELETE" }),

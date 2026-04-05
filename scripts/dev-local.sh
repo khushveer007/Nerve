@@ -10,6 +10,7 @@ COMPOSE_ARGS=(
   --env-file "$ENV_FILE"
 )
 API_PID=""
+WORKER_PID=""
 WEB_PID=""
 DB_CONTAINER_ID=""
 CLEANUP_WATCHER_PID=""
@@ -27,8 +28,13 @@ cleanup() {
     kill "$API_PID" 2>/dev/null || true
   fi
 
+  if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
+    kill "$WORKER_PID" 2>/dev/null || true
+  fi
+
   wait "$WEB_PID" 2>/dev/null || true
   wait "$API_PID" 2>/dev/null || true
+  wait "$WORKER_PID" 2>/dev/null || true
 
   "${COMPOSE_ARGS[@]}" down --remove-orphans >/dev/null 2>&1 || true
 
@@ -109,6 +115,13 @@ echo "Starting API on http://127.0.0.1:${API_PORT:-3001}"
 ) &
 API_PID=$!
 
+echo "Starting RAG worker"
+(
+  cd "$ROOT_DIR"
+  npm run dev:worker
+) &
+WORKER_PID=$!
+
 echo "Starting Vite on http://127.0.0.1:8080"
 (
   cd "$ROOT_DIR"
@@ -119,4 +132,4 @@ WEB_PID=$!
 echo "Local dev is running."
 echo "Login with ${SUPER_ADMIN_EMAIL:-super@parul.ac.in} and the SUPER_ADMIN_PASSWORD from $(basename "$ENV_FILE")."
 
-wait -n "$API_PID" "$WEB_PID"
+wait -n "$API_PID" "$WORKER_PID" "$WEB_PID"

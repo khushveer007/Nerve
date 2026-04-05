@@ -4,6 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   bootstrapSettingsDatabase,
@@ -32,6 +33,7 @@ import {
   deleteTeam,
   deleteUser,
   getBootstrapData,
+  getEntryById,
   getUserByEmail,
   getUserById,
   listBrandingRows,
@@ -39,6 +41,7 @@ import {
   listTeams,
   listUsers,
   pool,
+  updateEntry,
   updateBrandingRow,
   updateUser,
   type AppRole,
@@ -86,8 +89,11 @@ import {
   castDesignVote,
   getDesignVoters,
 } from "./branding-db.js";
+import { runRagMigrations } from "./rag/db.js";
+import { enqueueEntryBackfill, enqueueEntryReindex } from "./rag/jobs.js";
+import { createAssistantRouter } from "./rag/routes.js";
 
-const app = express();
+export const app = express();
 const PgStore = connectPgSimple(session);
 
 // ── File upload setup ──────────────────────────────────────────────────────
@@ -158,6 +164,8 @@ const entrySchema = z.object({
   collaborating_org: z.string().default(""),
 });
 
+const updateEntrySchema = entrySchema.omit({ created_by: true }).partial();
+
 const createUserSchema = z.object({
   full_name: z.string().min(1),
   email: z.string().email(),
@@ -202,6 +210,16 @@ function asyncHandler(
   return (req, res, next) => {
     void handler(req, res, next).catch(next);
   };
+}
+
+function enqueueEntryReindexInBackground(entryId: string) {
+  if (!config.assistant.enabled) {
+    return;
+  }
+
+  void enqueueEntryReindex(entryId).catch((error) => {
+    console.error(`Failed to enqueue assistant reindex for entry ${entryId}`, error);
+  });
 }
 
 function isPgUniqueViolation(error: unknown) {
@@ -377,13 +395,54 @@ app.post("/api/entries", asyncHandler(async (req, res) => {
     ...parsed.data,
     created_by: currentUser.id,
   });
+  enqueueEntryReindexInBackground(entry.id);
   res.status(201).json({ entry });
 }));
 
+app.patch("/api/entries/:id", asyncHandler(async (req, res) => {
+  const parsed = updateEntrySchema.safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, "Invalid entry update payload.");
+
+  const entryId = getSingleParam(req.params.id);
+  const existing = await getEntryById(entryId);
+  if (!existing) return sendError(res, 404, "Entry not found.");
+
+  const updatedEntry = await updateEntry(entryId, parsed.data);
+  if (!updatedEntry) return sendError(res, 404, "Entry not found.");
+
+  enqueueEntryReindexInBackground(updatedEntry.id);
+  res.json({ entry: updatedEntry });
+}));
+
 app.delete("/api/entries/:id", asyncHandler(async (req, res) => {
-  await deleteEntry(getSingleParam(req.params.id));
+  const entryId = getSingleParam(req.params.id);
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    if (config.assistant.enabled) {
+      await client.query(
+        `UPDATE knowledge_assets
+            SET status = 'deleted',
+                updated_at = NOW()
+          WHERE source_table = 'entries'
+            AND source_id = $1`,
+        [entryId],
+      );
+    }
+    await client.query(`DELETE FROM entries WHERE id = $1`, [entryId]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
   res.json({ ok: true });
 }));
+
+app.use("/api/assistant", createAssistantRouter());
 
 app.get("/api/users", asyncHandler(async (_req, res) => {
   res.json({ users: await listUsers() });
@@ -1008,15 +1067,33 @@ app.delete("/api/branding/portal/projects/:id", asyncHandler(async (req, res) =>
 
 // ── Start server ───────────────────────────────────────────────────────────
 
-bootstrapDatabase()
-  .then(() => bootstrapBrandingDatabase())
-  .then(() => bootstrapSettingsDatabase())
-  .then(() => {
+function isMainModule() {
+  return process.argv[1] === fileURLToPath(import.meta.url);
+}
+
+export async function prepareApiRuntime() {
+  await bootstrapDatabase();
+  await bootstrapBrandingDatabase();
+  await bootstrapSettingsDatabase();
+  if (config.assistant.enabled) {
+    await runRagMigrations();
+    await enqueueEntryBackfill();
+  }
+}
+
+export async function startApiServer() {
+  await prepareApiRuntime();
+  return new Promise<void>((resolve) => {
     app.listen(config.apiPort, () => {
       console.log(`Nerve API listening on ${config.apiPort}`);
+      resolve();
     });
-  })
-  .catch((error) => {
+  });
+}
+
+if (isMainModule()) {
+  startApiServer().catch((error) => {
     console.error("Failed to start API", error);
     process.exit(1);
   });
+}

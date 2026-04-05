@@ -22,7 +22,13 @@ import { useIsMobile } from '@/hooks/use-mobile'
 
 import { ASSISTANT_STARTER_PROMPTS, getAssistantAnnouncement } from '../constants'
 import { useAssistantAvailability } from '../hooks/useAssistantAvailability'
-import type { AssistantMessage, AssistantMode, AssistantVisibleState } from '../types'
+import { useAssistantQuery } from '../hooks/useAssistantQuery'
+import type {
+  AssistantMessage,
+  AssistantMode,
+  AssistantQueryResult,
+  AssistantVisibleState,
+} from '../types'
 import AssistantComposer from './AssistantComposer'
 import AssistantContextPanel from './AssistantContextPanel'
 import AssistantEmptyState from './AssistantEmptyState'
@@ -36,18 +42,42 @@ function createMessageId() {
   return `assistant-turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+const EMPTY_FILTERS = {
+  departments: [],
+  entry_types: [],
+  priorities: [],
+  tags: [],
+} as const
+
+function buildAssistantSummary(result: AssistantQueryResult) {
+  if (result.results.length === 0) {
+    return 'No indexed entry-backed results matched this request yet.'
+  }
+
+  if (result.mode === 'ask') {
+    return `Grounded answer synthesis is still reserved for a later story, but I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} for this request.`
+  }
+
+  return `I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} from the indexed Phase 1 corpus.`
+}
+
 export default function AssistantPage() {
   const [mode, setMode] = useState<AssistantMode>('auto')
   const [draft, setDraft] = useState('')
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
+  const [pendingConversationId, setPendingConversationId] = useState<number | null>(null)
 
+  const conversationIdRef = useRef(0)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const isMobile = useIsMobile()
-  const { availability, showUnavailable } = useAssistantAvailability()
+  const { availability, isChecking, showUnavailable } = useAssistantAvailability()
+  const queryMutation = useAssistantQuery()
 
   const hasTranscript = messages.length > 0
+  const lastAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
+  const isSubmitting = pendingConversationId === conversationIdRef.current
 
   const visibleState: AssistantVisibleState = useMemo(() => {
     if (showUnavailable) {
@@ -59,39 +89,159 @@ export default function AssistantPage() {
       }
     }
 
+    if (isChecking) {
+      return {
+        kind: 'loading',
+        stage: 'checking',
+        title: 'Checking assistant availability.',
+        description: 'The workspace is confirming whether the backend entry search service is ready for queries.',
+      }
+    }
+
+    if (isSubmitting) {
+      return {
+        kind: 'loading',
+        stage: 'retrieving',
+        title: 'Searching the indexed entry corpus.',
+        description: 'The assistant is retrieving entry-backed matches from the Phase 1 knowledge layer.',
+      }
+    }
+
+    if (!hasTranscript && availability.available && availability.source === 'service') {
+      return {
+        kind: 'info',
+        title: availability.title,
+        description: availability.description,
+        nextStep: availability.nextStep,
+      }
+    }
+
     if (!hasTranscript) {
       return { kind: 'empty' }
     }
 
+    if (lastAssistantMessage?.error) {
+      return {
+        kind: 'error',
+        title: lastAssistantMessage.error.title,
+        description: lastAssistantMessage.error.description,
+      }
+    }
+
+    if (lastAssistantMessage?.result && lastAssistantMessage.result.results.length === 0) {
+      return {
+        kind: 'no_answer',
+        title: 'No indexed entry-backed matches were found.',
+        description: 'Try a known title phrase, department name, or tag from an existing Nerve entry.',
+      }
+    }
+
     return { kind: 'result' }
-  }, [availability, hasTranscript, showUnavailable])
+  }, [availability, hasTranscript, isChecking, isSubmitting, lastAssistantMessage, showUnavailable])
 
   function focusComposer() {
     composerRef.current?.focus()
   }
 
-  function handleSubmit(nextPrompt?: string) {
+  async function handleSubmit(nextPrompt?: string) {
     const content = (nextPrompt ?? draft).trim()
 
-    if (!content) {
+    if (!content || isChecking || isSubmitting) {
       return
     }
 
-    setMessages((current) => [
-      ...current,
-      {
-        id: createMessageId(),
-        role: 'user',
-        content,
-        mode,
-        createdAt: new Date().toISOString(),
-      },
-    ])
+    const conversationId = conversationIdRef.current
+    const createdAt = new Date().toISOString()
+    const userMessage: AssistantMessage = {
+      id: createMessageId(),
+      role: 'user',
+      content,
+      mode,
+      createdAt,
+    }
+
+    setMessages((current) => [...current, userMessage])
     setDraft('')
+    setPendingConversationId(conversationId)
     focusComposer()
+
+    if (showUnavailable) {
+      setPendingConversationId(null)
+      setMessages((current) => [
+        ...current,
+        {
+          id: createMessageId(),
+          role: 'assistant',
+          content: '',
+          mode,
+          createdAt: new Date().toISOString(),
+          error: {
+            title: availability.title,
+            description: availability.description,
+          },
+        },
+      ])
+      return
+    }
+
+    try {
+      const result = await queryMutation.mutateAsync({
+        query: {
+          mode,
+          text: content,
+          filters: EMPTY_FILTERS,
+        },
+      })
+
+      if (conversationIdRef.current !== conversationId) {
+        return
+      }
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: createMessageId(),
+          role: 'assistant',
+          content: buildAssistantSummary(result),
+          mode,
+          createdAt: new Date().toISOString(),
+          result,
+        },
+      ])
+    } catch (error) {
+      if (conversationIdRef.current !== conversationId) {
+        return
+      }
+
+      const description = error instanceof Error
+        ? error.message
+        : 'The assistant request could not be completed.'
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: createMessageId(),
+          role: 'assistant',
+          content: '',
+          mode,
+          createdAt: new Date().toISOString(),
+          error: {
+            title: 'Assistant request failed.',
+            description,
+          },
+        },
+      ])
+    } finally {
+      if (conversationIdRef.current === conversationId) {
+        setPendingConversationId(null)
+      }
+    }
   }
 
   function handleNewConversation() {
+    conversationIdRef.current += 1
+    setPendingConversationId(null)
+    queryMutation.reset()
     setMessages([])
     setDraft('')
     focusComposer()
@@ -110,7 +260,9 @@ export default function AssistantPage() {
 
       <AssistantModeToggle mode={mode} onModeChange={setMode} />
 
-      {visibleState.kind === 'unavailable' && <AssistantStatusCard status={visibleState} />}
+      {(visibleState.kind === 'loading' || visibleState.kind === 'info' || visibleState.kind === 'unavailable') && (
+        <AssistantStatusCard status={visibleState} />
+      )}
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-4">
@@ -147,9 +299,12 @@ export default function AssistantPage() {
       </div>
 
       <AssistantComposer
+        disabled={isChecking || isSubmitting}
         mode={mode}
         onChange={setDraft}
-        onSubmit={() => handleSubmit()}
+        onSubmit={() => {
+          void handleSubmit()
+        }}
         textareaRef={composerRef}
         value={draft}
       />

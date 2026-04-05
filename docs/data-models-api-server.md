@@ -1,6 +1,6 @@
 # Nerve - Data Models (`api-server`)
 
-**Date:** 2026-04-02
+**Date:** 2026-04-05
 **Part:** `api-server`
 
 ## Overview
@@ -92,9 +92,81 @@ The active product path is the Express/PostgreSQL schema. The localStorage and S
 
 The session table is managed by `connect-pg-simple` and is not declared directly in repo SQL, but it is part of the active runtime schema because Express sessions persist into PostgreSQL.
 
-### Extension Usage
+## RAG Knowledge Schema
 
-`bootstrapDatabase()` runs `CREATE EXTENSION IF NOT EXISTS vector`, but the active schema does not currently define any vector columns.
+Story 1.2 adds a migration-managed retrieval layer in `server/migrations/` and `server/rag/`. These tables are derived from the business records in `entries`; they do not replace the authoritative CRUD schema in `server/db.ts`.
+
+### `knowledge_assets`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | Primary key |
+| `source_kind` | `TEXT` | `entry`, `uploaded_file`, `branding_record` |
+| `source_table` | `TEXT` | Phase 1 uses `entries` |
+| `source_id` | `TEXT` | Business-row foreign key by convention |
+| `title` | `TEXT` | Search/display title |
+| `mime_type` | `TEXT` | Phase 1 entries use `text/markdown` |
+| `media_type` | `TEXT` | `text`, `pdf`, `image`, `doc` |
+| `visibility_scope` | `TEXT` | Defaults to `authenticated` for entries |
+| `status` | `TEXT` | `pending`, `processing`, `ready`, `failed`, `deleted` |
+| `metadata` | `JSONB` | Preserves ranking/filtering metadata such as `dept`, `type`, `tags`, `entry_date`, `priority`, and related fields |
+| `sha256` | `TEXT` | Source hash of the current indexed content |
+| `created_at` / `updated_at` | `TIMESTAMPTZ` | Lifecycle timestamps |
+
+### `knowledge_asset_versions`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | Primary key |
+| `asset_id` | `TEXT` | FK to `knowledge_assets(id)` |
+| `version_no` | `INTEGER` | Monotonic per asset |
+| `source_hash` | `TEXT` | Used to skip unchanged reindexes |
+| `extractor_model` | `TEXT` | `entry-phase-1` or the configured embedding model |
+| `extraction_status` | `TEXT` | `processing`, `ready`, `failed`, `superseded` |
+| `normalized_markdown` | `TEXT` | Versioned normalized representation |
+| `normalized_text` | `TEXT` | Search/index source text |
+| `structural_metadata` | `JSONB` | Chunking/structure summary |
+| `superseded_at` | `TIMESTAMPTZ` | Null for the current searchable version |
+
+### `knowledge_chunks`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | Primary key |
+| `asset_version_id` | `TEXT` | FK to `knowledge_asset_versions(id)` |
+| `asset_id` | `TEXT` | FK to `knowledge_assets(id)` |
+| `chunk_no` | `INTEGER` | Sequence within a version |
+| `chunk_type` | `TEXT` | Phase 1 uses `body` |
+| `heading_path` | `TEXT[]` | Citation-friendly section labels |
+| `content` | `TEXT` | Entry chunk text; first chunk includes title plus key metadata |
+| `search_vector` | `TSVECTOR` | Weighted full-text search representation |
+| `embedding` | `VECTOR(1536)` | Nullable until an embedding endpoint is configured |
+| `metadata` | `JSONB` | Chunk-local metadata for ranking/filtering |
+| `citation_locator` | `JSONB` | Machine-usable citation trace |
+
+### `knowledge_acl_principals`
+
+Explicit ACL rows reserved for later non-default visibility scopes.
+
+### `knowledge_jobs`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | Primary key |
+| `asset_id` | `TEXT` | FK to `knowledge_assets(id)` |
+| `asset_version_id` | `TEXT` | Nullable FK to `knowledge_asset_versions(id)` |
+| `job_type` | `TEXT` | Includes `reindex` in the Phase 1 implementation |
+| `status` | `TEXT` | `queued`, `running`, `succeeded`, `failed`, `dead_letter` |
+| `attempt_count` | `INTEGER` | Retry counter |
+| `run_after` | `TIMESTAMPTZ` | Backoff scheduling point |
+| `locked_at` | `TIMESTAMPTZ` | Worker-claim timestamp |
+| `worker_id` | `TEXT` | Current worker identifier |
+| `last_error` | `TEXT` | Latest failure detail |
+| `payload` | `JSONB` | Source reference for reindex jobs |
+
+### `rag_schema_migrations`
+
+Tracks the applied SQL migration filenames for the RAG layer. The API and worker both run the migration runner before serving traffic or jobs.
 
 ## Active Seed Data
 
@@ -172,6 +244,7 @@ This drift means any attempt to reconnect the frontend to Supabase will require 
 ## Brownfield Guidance
 
 - For current backend feature work, treat the Express/PostgreSQL schema as the source of truth.
+- Treat `knowledge_*` tables as derived retrieval structures fed from `entries`; business CRUD should continue to target `entries`.
 - Use the localStorage schema only when cleaning up or migrating legacy unrouted screens.
 - Use the retained Supabase schema as reference material for historical intent, not as an exact contract for the current runtime.
 

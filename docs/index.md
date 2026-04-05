@@ -3,7 +3,7 @@
 **Type:** multi-part with 2 active parts
 **Primary Language:** TypeScript
 **Architecture:** React SPA + Express API + PostgreSQL + retained Supabase assets
-**Last Updated:** 2026-04-02
+**Last Updated:** 2026-04-05
 
 ## Project Overview
 
@@ -103,6 +103,7 @@ npm run dev
 ```bash
 npm ci
 npm run dev:server
+npm run dev:worker
 ```
 
 ## For AI-Assisted Development
@@ -128,6 +129,7 @@ Reference `deployment-guide.md` and the existing root `DEPLOYMENT.md`
 - The hybrid client data model (`useAppData()` vs `src/lib/db.ts`)
 - Session auth and role checks across both client and API
 - Startup bootstrap behavior in `server/db.ts`
+- Migration-managed assistant search in `server/migrations/`, `server/rag/`, and `server/workers/`
 - The boundary between active runtime code and retained Supabase assets
 
 ---

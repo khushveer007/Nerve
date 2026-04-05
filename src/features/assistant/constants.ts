@@ -63,9 +63,15 @@ export const ASSISTANT_UNAVAILABLE: AssistantAvailability = {
 export function getAssistantAnnouncement(state: AssistantVisibleState): string {
   switch (state.kind) {
     case 'loading':
+      if (state.stage === 'checking') {
+        return 'Checking assistant availability.'
+      }
+
       return state.stage === 'retrieving'
         ? 'Retrieving matching entries.'
         : 'Generating grounded answer.'
+    case 'info':
+      return state.title
     case 'no_answer':
       return 'No grounded answer was found for the current request.'
     case 'error':

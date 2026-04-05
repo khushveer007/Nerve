@@ -1,5 +1,5 @@
 import { ASSISTANT_UNAVAILABLE } from './constants'
-import type { AssistantAvailability } from './types'
+import type { AssistantAvailability, AssistantQueryRequest, AssistantQueryResult } from './types'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 const ASSISTANT_HEALTH_PATH = (import.meta.env.VITE_ASSISTANT_HEALTH_PATH || '/assistant/health').replace(
@@ -62,5 +62,25 @@ export const assistantApi = {
         source: 'error',
       }
     }
+  },
+
+  async query(input: AssistantQueryRequest): Promise<AssistantQueryResult> {
+    const response = await fetch(`${API_BASE_URL}/assistant/query`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(payload.message || 'Assistant request failed.')
+    }
+
+    return payload.result as AssistantQueryResult
   },
 }

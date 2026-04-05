@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
 import AssistantStatusAnnouncer from '@/features/assistant/components/AssistantStatusAnnouncer'
@@ -25,6 +25,70 @@ function renderAssistantPage() {
       <AIQueryPage />
     </QueryClientProvider>,
   )
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve
+  })
+
+  return { promise, resolve }
+}
+
+function buildAssistantQueryResponse() {
+  return {
+    result: {
+      mode: 'search',
+      answer: null,
+      enough_evidence: true,
+      grounded: false,
+      citations: [],
+      follow_up_suggestions: [],
+      request_id: 'req_test_1',
+      results: [
+        {
+          asset_id: 'asset_1',
+          asset_version_id: 'asset_ver_1',
+          chunk_id: 'chunk_1',
+          entry_id: 'entry_1',
+          title: 'Design Department Partners with Adobe for Creative Suite',
+          source_kind: 'entry',
+          media_type: 'text',
+          snippet: 'Parul University has partnered with Adobe to provide Creative Suite access.',
+          score: 2.4,
+          metadata: {
+            source_kind: 'entry',
+            entry_id: 'entry_1',
+            dept: 'Design',
+            type: 'MOU / Partnership',
+            tags: ['adobe', 'design'],
+            entry_date: '2026-01-10',
+            academic_year: '2025-26',
+            author_name: 'Prof. Neha Gupta',
+            created_by: 'ba-001',
+            priority: 'Normal',
+            student_count: 200,
+            external_link: '',
+            collaborating_org: 'Adobe Inc.',
+          },
+          citation_locator: {
+            asset_id: 'asset_1',
+            asset_version_id: 'asset_ver_1',
+            chunk_id: 'chunk_1',
+            title: 'Design Department Partners with Adobe for Creative Suite',
+            source_kind: 'entry',
+            page_from: null,
+            page_to: null,
+            heading_path: ['Entry overview'],
+            char_start: 0,
+            char_end: 120,
+          },
+        },
+      ],
+    },
+  }
 }
 
 describe('AIQueryPage', () => {
@@ -118,6 +182,215 @@ describe('AIQueryPage', () => {
     expect(
       screen.queryByText(/assistant search and answer services are unavailable/i),
     ).not.toBeInTheDocument()
+  })
+
+  it('submits a known-item query and renders entry-backed backend results without local fallback copy', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        expect(init?.method).toBe('POST')
+        expect(init?.body).toBe(
+          JSON.stringify({
+            query: {
+              mode: 'search',
+              text: 'Adobe Creative Suite',
+              filters: {
+                departments: [],
+                entry_types: [],
+                priorities: [],
+                tags: [],
+              },
+            },
+          }),
+        )
+
+        return {
+          ok: true,
+          json: async () => buildAssistantQueryResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Adobe Creative Suite' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('Design Department Partners with Adobe for Creative Suite')).toBeInTheDocument()
+    expect(screen.getByText(/1 entry-backed result/i)).toBeInTheDocument()
+    expect(screen.getByText('Adobe Inc.')).toBeInTheDocument()
+    expect(screen.queryByText(/local keyword search results/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/AI backend disconnected/i)).not.toBeInTheDocument()
+  })
+
+  it('ignores stale assistant replies after starting a new conversation', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const deferredQuery = createDeferred<ReturnType<typeof buildAssistantQueryResponse>>()
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            title: 'Assistant is available.',
+            description: 'Entry-backed assistant services are connected.',
+            nextStep: 'Submit a question to start a session.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => deferredQuery.promise,
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Adobe Creative Suite' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('Adobe Creative Suite')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message assistant')).not.toBeDisabled()
+    })
+
+    await act(async () => {
+      deferredQuery.resolve(buildAssistantQueryResponse())
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText('Adobe Creative Suite')).not.toBeInTheDocument()
+      expect(screen.queryByText('Design Department Partners with Adobe for Creative Suite')).not.toBeInTheDocument()
+    })
+  })
+
+  it('blocks assistant submission until the initial availability check settles', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const deferredHealth = createDeferred<{
+      available: boolean
+      title: string
+      description: string
+      nextStep: string
+    }>()
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => deferredHealth.promise,
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Checking assistant availability.')
+    })
+    expect(screen.getByLabelText('Message assistant')).toBeDisabled()
+
+    fireEvent.click(screen.getAllByRole('button', { name: /assistant starter prompt/i })[0])
+
+    expect(screen.queryByText('Current session')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      deferredHealth.resolve({
+        available: true,
+        title: 'Assistant is available.',
+        description: 'Entry-backed assistant services are connected.',
+        nextStep: 'Submit a question to start a session.',
+      })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Message assistant')).not.toBeDisabled()
+    })
+  })
+
+  it('surfaces healthy assistant status while the entry corpus is still preparing', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        available: true,
+        title: 'Assistant is preparing the entry corpus.',
+        description: 'The backend is healthy, but the entry corpus has not been indexed yet.',
+        nextStep: 'Start the worker or wait for queued jobs to finish before validating search results.',
+      }),
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    expect(await screen.findByText('Assistant is preparing the entry corpus.')).toBeInTheDocument()
+    expect(screen.getByText(/entry corpus has not been indexed yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/start the worker or wait for queued jobs to finish/i)).toBeInTheDocument()
+    expect(screen.queryByText(/assistant search and answer services are unavailable/i)).not.toBeInTheDocument()
   })
 })
 

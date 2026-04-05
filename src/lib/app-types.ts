@@ -74,6 +74,21 @@ export interface CreateEntryInput {
   collaborating_org: string;
 }
 
+export interface UpdateEntryInput {
+  title?: string;
+  dept?: string;
+  type?: string;
+  body?: string;
+  priority?: "Normal" | "High" | "Key highlight";
+  entry_date?: string;
+  tags?: string[];
+  author_name?: string;
+  academic_year?: string;
+  student_count?: number | null;
+  external_link?: string;
+  collaborating_org?: string;
+}
+
 export interface CreateUserInput {
   full_name: string;
   email: string;

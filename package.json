@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "tsx watch server/index.ts",
+    "dev:worker": "tsx watch server/workers/rag-worker.ts",
     "dev:local": "bash ./scripts/dev-local.sh",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
@@ -14,8 +15,11 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "start:server": "node dist-server/server/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "start:worker": "node dist-server/server/workers/rag-worker.js",
+    "test": "npm run test:client && npm run test:server",
+    "test:client": "vitest run -c vitest.config.ts",
+    "test:server": "vitest run -c vitest.server.config.ts",
+    "test:watch": "vitest -c vitest.config.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

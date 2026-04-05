@@ -114,6 +114,21 @@ export interface CreateEntryInput {
   collaborating_org: string;
 }
 
+export interface UpdateEntryInput {
+  title?: string;
+  dept?: string;
+  type?: string;
+  body?: string;
+  priority?: "Normal" | "High" | "Key highlight";
+  entry_date?: string;
+  tags?: string[];
+  author_name?: string;
+  academic_year?: string;
+  student_count?: number | null;
+  external_link?: string;
+  collaborating_org?: string;
+}
+
 export interface CreateTeamInput {
   name: string;
   color: string;
@@ -250,8 +265,6 @@ function mapBrandingRow(row: BrandingRowRecord): BrandingRow {
 }
 
 export async function bootstrapDatabase() {
-  await pool.query(`CREATE EXTENSION IF NOT EXISTS vector`);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS teams (
       id TEXT PRIMARY KEY,
@@ -501,6 +514,11 @@ export async function listEntries() {
   return result.rows.map(mapEntry);
 }
 
+export async function getEntryById(id: string) {
+  const result = await pool.query<EntryRow>(`SELECT * FROM entries WHERE id = $1 LIMIT 1`, [id]);
+  return result.rows[0] ? mapEntry(result.rows[0]) : null;
+}
+
 export async function createEntry(input: CreateEntryInput) {
   const result = await pool.query<EntryRow>(
     `INSERT INTO entries (
@@ -529,6 +547,46 @@ export async function createEntry(input: CreateEntryInput) {
     ],
   );
   return mapEntry(result.rows[0]);
+}
+
+export async function updateEntry(id: string, input: UpdateEntryInput) {
+  const current = await getEntryById(id);
+  if (!current) return null;
+
+  const result = await pool.query<EntryRow>(
+    `UPDATE entries
+        SET title = $2,
+            dept = $3,
+            type = $4,
+            body = $5,
+            priority = $6,
+            entry_date = $7::date,
+            tags = $8::text[],
+            author_name = $9,
+            academic_year = $10,
+            student_count = $11,
+            external_link = $12,
+            collaborating_org = $13
+      WHERE id = $1
+      RETURNING *`,
+    [
+      id,
+      input.title ?? current.title,
+      input.dept ?? current.dept,
+      input.type ?? current.type,
+      input.body ?? current.body,
+      input.priority ?? current.priority,
+      input.entry_date ?? current.entry_date,
+      input.tags ?? current.tags,
+      input.author_name ?? current.author_name,
+      input.academic_year ?? current.academic_year,
+      input.student_count === undefined ? current.student_count : input.student_count,
+      input.external_link ?? current.external_link,
+      input.collaborating_org ?? current.collaborating_org,
+    ],
+  );
+
+  return result.rows[0] ? mapEntry(result.rows[0]) : null;
 }
 
 export async function deleteEntry(id: string) {

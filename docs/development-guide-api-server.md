@@ -1,6 +1,6 @@
 # Nerve - API Server Development Guide
 
-**Date:** 2026-04-02
+**Date:** 2026-04-05
 **Part:** `api-server`
 
 ## Scope
@@ -28,6 +28,10 @@ Useful defaults or optional values:
 - `APP_BASE_URL` defaults to `http://127.0.0.1`
 - `COOKIE_SECURE` defaults to `false`
 - `SUPER_ADMIN_EMAIL` defaults to `super@parul.ac.in`
+- `ASSISTANT_RAG_ENABLED` defaults to `true`
+- `ASSISTANT_QUERY_RESULT_LIMIT` defaults to `5`
+- `ASSISTANT_EMBEDDING_URL` is optional; if omitted, the Phase 1 query path stays search-first and stores null embeddings
+- `ASSISTANT_WORKER_POLL_MS`, `ASSISTANT_JOB_MAX_ATTEMPTS`, `ASSISTANT_JOB_RETRY_BASE_MS`, and `ASSISTANT_JOB_STALE_LOCK_MS` control the PostgreSQL job worker
 
 ## Local Setup
 
@@ -37,6 +41,7 @@ Useful defaults or optional values:
 npm ci
 cp .env.example .env
 npm run dev:server
+npm run dev:worker
 ```
 
 If you use this path, ensure `DATABASE_URL` points to a reachable local database. The sample `.env.example` uses `127.0.0.1:5432`.
@@ -46,7 +51,7 @@ If you use this path, ensure `DATABASE_URL` points to a reachable local database
 ```bash
 npm ci
 cp .env.example .env
-docker compose up -d db api
+docker compose up -d db api worker
 ```
 
 If the API itself runs in Docker, its `DATABASE_URL` should target the Compose service host (`db`) rather than `127.0.0.1`.
@@ -55,9 +60,11 @@ If the API itself runs in Docker, its `DATABASE_URL` should target the Compose s
 
 ```bash
 npm run dev:server
+npm run dev:worker
 npm run build:server
 npm run start:server
-docker compose up -d db api
+npm run start:worker
+docker compose up -d db api worker
 docker compose ps
 ```
 
@@ -70,7 +77,9 @@ When the server boots, it:
 3. Creates the core tables if missing
 4. Seeds built-in teams, users, and entries if the tables are empty
 5. Replaces the legacy seeded super-admin credentials with configured values
-6. Starts listening on `API_PORT`
+6. Runs versioned RAG migrations from `server/migrations/`
+7. Queues entry backfill jobs for the worker
+8. Starts listening on `API_PORT`
 
 This means local startup is stateful. Changes to the seed logic or bootstrap rules can affect every fresh environment.
 
@@ -78,6 +87,9 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 
 - `server/index.ts` - middleware, auth gate, routes, startup
 - `server/db.ts` - SQL schema creation, row mapping, and CRUD operations
+- `server/migrations/*.sql` - versioned RAG schema and index definitions
+- `server/rag/*` - assistant routes, ingestion, search, and job helpers
+- `server/workers/rag-worker.ts` - PostgreSQL-backed RAG worker entrypoint
 - `server/config.ts` - env loading and guardrails
 - `server/password.ts` - hashing and verification
 - `server/seed.ts` - built-in teams, users, entries, and legacy bootstrap values
@@ -99,6 +111,13 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 4. Revisit seed data if the shape changed
 5. Update `docs/data-models-api-server.md`
 
+### Change the assistant RAG layer
+
+1. Add or edit SQL migrations in `server/migrations/`
+2. Keep retrieval/indexing code in `server/rag/*`, not inline in `server/index.ts`
+3. Update the worker path in `server/workers/rag-worker.ts` when queue semantics change
+4. Extend `server/test/rag/*` and the assistant client tests together so backend and shell behavior stay aligned
+
 ### Change auth or role behavior
 
 1. Update `RoleGuard` on the client if needed
@@ -118,9 +137,8 @@ These scripts assume a VPS filesystem layout under `/srv/nerve`.
 
 ## Known Constraints
 
-- The backend has no dedicated automated test suite yet.
-- `server/db.ts` is the central data module and may become hard to evolve without careful refactoring.
-- Startup schema creation works for small deployments but can blur the line between app boot and migrations.
+- `server/db.ts` still owns the business-table bootstrap path, so keep new retrieval work in `server/rag/*` rather than growing it further.
+- Assistant embeddings are optional in Story 1.2; if no embedding endpoint is configured, search still works through metadata, trigram, and FTS.
 - The retained Supabase schema diverges from the active API role model.
 
 ## Recommended Checks Before Merging Backend Work
@@ -129,12 +147,13 @@ These scripts assume a VPS filesystem layout under `/srv/nerve`.
 npm run lint
 npm test
 npm run build:server
+npm run build
 ```
 
 For deployment-sensitive changes, also validate:
 
 ```bash
-docker compose up -d db api
+docker compose up -d db api worker
 curl -sS http://127.0.0.1:3001/api/health
 ```
 
