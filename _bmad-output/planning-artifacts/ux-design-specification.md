@@ -53,7 +53,7 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 - Show search-result style responses for `find`, `show`, `list`, and known-item queries.
 - Show answer style responses for summarization, comparison, and question queries.
 - Make low-confidence and no-evidence outcomes explicit and useful.
-- Support mixed source types: entries, PDFs, documents, and images with OCR text.
+- Support Phase 1 entry-backed retrieval first, then extend the same experience to PDFs, documents, and images with OCR text in later phases.
 - Remain usable on desktop and mobile.
 
 ### Experience Principles
@@ -77,7 +77,7 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 
 | Region | Purpose | Notes |
 | --- | --- | --- |
-| Header | Page identity and secondary actions | Title, helper text, `New conversation`, `Filters`, and role-gated `Add source` action |
+| Header | Page identity and secondary actions | Title, helper text, `New conversation`, `Filters`, and later-phase role-gated source-management actions |
 | Mode bar | Query intent control | Segmented control for `Auto`, `Search`, `Ask` |
 | Main results column | Transcript and result stack | Shows answer cards, search-result groups, state cards, and follow-up suggestions |
 | Context rail | Evidence and source detail | Sticky right rail on desktop; sheet or drawer on mobile |
@@ -97,8 +97,8 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 | User type | Main experience | Additional controls |
 | --- | --- | --- |
 | All authenticated users | Query accessible knowledge, inspect citations, open accessible sources | None beyond query, filter, and open actions |
-| `admin` / `sub_admin` | Same assistant experience | `Add source` action, upload-state visibility for owned or managed content, management metadata where permitted |
-| `super_admin` | Same assistant experience | Broadest source management visibility, but operational diagnostics should still live in a dedicated management surface rather than clutter the main assistant flow |
+| `admin` / `sub_admin` | Same Phase 1 assistant experience | Later-phase source-management actions, upload-state visibility for owned or managed content, and management metadata where permitted |
+| `super_admin` | Same Phase 1 assistant experience | Broadest later-phase source-management visibility, but operational diagnostics should still live in a dedicated management surface rather than clutter the main assistant flow |
 
 ## Page Layout And Interaction Model
 
@@ -117,7 +117,7 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 - Keep the composer sticky at the bottom with safe-area padding.
 - Move filters into a full-height `Sheet`.
 - Move the evidence rail into a bottom sheet or right-side sheet triggered by citation chips and source cards.
-- Keep header actions concise: `Filters`, `New`, and a role-gated overflow action for upload.
+- Keep header actions concise: `Filters` and `New`; reserve any upload action for a later-phase overflow menu or dedicated management surface.
 
 ### Header
 
@@ -126,7 +126,7 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 - Primary utilities:
 - `New conversation`
 - `Filters`
-- `Add source` for roles permitted to upload/index knowledge
+- Reserve `Add source` for a later-phase assistant extension or dedicated management surface
 - When the backend is unavailable, replace the current disconnected warning with a full-width status card that explains what is unavailable and what still works.
 
 ### Composer
@@ -143,12 +143,12 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 | Mode | User expectation | Default response shape | Notes |
 | --- | --- | --- | --- |
 | `Auto` | "Decide the best response for me." | Search-style for retrieval intents, answer-style for synthesis intents, mixed when needed | Default mode on page load |
-| `Search` | "Help me find sources." | Ranked result list with snippets, type badges, and optional short summary | Best for `find`, `show`, `list`, `which file`, `what documents mention` |
+| `Search` | "Help me find sources." | Ranked result list with snippets, type badges, and optional short summary | Best for `find`, `show`, `list`, `which entry`, `what entries mention` |
 | `Ask` | "Answer from the evidence." | Grounded answer card with inline citations and evidence section | Best for `summarize`, `compare`, `what does`, `why`, `how` |
 
 ### Auto Mode Rules
 
-- Queries with retrieval verbs such as `find`, `show`, `list`, `which`, `where`, or explicit file-type nouns should resolve to search-first layout.
+- Queries with retrieval verbs such as `find`, `show`, `list`, `which`, `where`, or explicit known-item nouns should resolve to search-first layout.
 - Queries asking for summary, comparison, explanation, or policy understanding should resolve to answer-first layout.
 - Ambiguous queries may return a mixed response:
 - short grounded answer at the top
@@ -159,11 +159,11 @@ The UX must prioritize trust over fluency. Every substantive answer needs citati
 
 ### 1. First Visit / Empty State
 
-The user lands on `/ai/query` and sees a calm, search-like empty state instead of an empty chat log. The page should show the mode selector, a short trust statement, and 4 to 6 starter chips such as `Find a policy PDF`, `Summarize attendance guidance`, `Show recent admissions documents`, and `What do the documents say about placement updates?`
+The user lands on `/ai/query` and sees a calm, search-like empty state instead of an empty chat log. The page should show the mode selector, a short trust statement, and 4 to 6 starter chips such as `Find the attendance guidance entry`, `Summarize attendance guidance`, `Show recent admissions entries`, and `What does Nerve say about placement updates?`
 
 ### 2. Known-Item Search Flow
 
-The user asks something like `find the PDF about attendance` or `show documents related to admissions`. In `Auto` or `Search`, the assistant returns:
+The user asks something like `find the attendance guidance entry` or `show admissions entries related to scholarship deadlines`. In `Auto` or `Search`, the assistant returns:
 
 - a compact top summary such as `I found 6 accessible sources`
 - ranked source cards with content-type badges and short snippets
@@ -174,7 +174,7 @@ This flow should feel closer to Nerve's existing browse experience than to chat.
 
 ### 3. Grounded Answer Flow
 
-The user asks `summarize what the stored documents say about the 75% attendance rule`. In `Auto` or `Ask`, the assistant returns:
+The user asks `summarize what Nerve says about the 75% attendance rule`. In `Auto` or `Ask`, the assistant returns:
 
 - a concise answer card
 - inline citation chips attached to each substantive claim
@@ -185,12 +185,12 @@ The answer should read like a verified summary, not a conversational monologue.
 
 ### 4. Citation Inspection Flow
 
-The user clicks a citation chip such as `S2 p.4`. The context rail opens or updates to show:
+The user clicks a citation chip such as `S2`. The context rail opens or updates to show:
 
 - source title and type
-- page or section locator
+- body or section locator, with page locators added for later-phase document sources
 - highlighted snippet
-- available actions such as `Open source` or `Download`
+- available actions such as `Open source` and, in later phases, `Download`
 
 The clicked citation must remain visibly linked to the active snippet so the user can tell exactly what supports the claim.
 
@@ -208,9 +208,9 @@ Both states should offer helpful next actions:
 - try a document name or department
 - review related accessible sources if any exist
 
-### 6. Upload And Indexing Flow
+### 6. Future Upload And Indexing Flow (Phase 2+)
 
-For permitted roles, the page header includes `Add source`. Upload opens a dialog or sheet for PDFs, documents, or images. After submission, the user sees source-state feedback using clear badges:
+For permitted roles, a later-phase assistant or management surface may include `Add source`. Upload can open a dialog or sheet for PDFs, documents, or images. After submission, the user should see source-state feedback using clear badges:
 
 - `Uploading`
 - `Processing`
@@ -218,7 +218,7 @@ For permitted roles, the page header includes `Add source`. Upload opens a dialo
 - `Failed`
 - `Reindexing`
 
-These states should appear in privileged source cards or a compact recent-uploads panel, but not overwhelm the main query experience for everyday users.
+These states should appear in privileged source cards or a compact recent-uploads panel, but they are not part of the Phase 1 launch gate.
 
 ## Result Presentation Patterns
 
@@ -233,15 +233,15 @@ Use this layout for `find/show/list` intents:
 
 #### Source Card Anatomy
 
-- Source icon and content-type badge: `Entry`, `PDF`, `Doc`, `Image`
+- Source icon and content-type badge: `Entry` in Phase 1, then `PDF`, `Doc`, and `Image` in later phases
 - Title
-- Secondary metadata: department, owner/team when appropriate, date, status
-- Snippet or OCR excerpt with matched terms emphasized
+- Secondary metadata: department, owner/team when appropriate, date, and later-phase status when relevant
+- Snippet with matched terms emphasized in Phase 1, then OCR excerpt or content-type-specific snippet behavior in later phases
 - Citation locator where relevant: page, section, or body location
 - Actions:
 - `Preview`
 - `Open source`
-- `Download` only when allowed
+- `Download` only when later-phase asset types support it and it is allowed
 
 ### Answer Style Response
 
@@ -261,6 +261,8 @@ Use this when `Auto` determines the user needs both synthesis and discovery:
 - label the second section clearly as `Sources used` or `Related sources`
 
 ### Evidence Preview By Content Type
+
+Phase 1 launch requires only the `Entry` behavior below. The PDF, document, and image patterns describe the intended later-phase extension so the interaction model stays consistent as the corpus expands.
 
 | Content type | Default preview behavior | Open behavior |
 | --- | --- | --- |
@@ -293,7 +295,7 @@ The rail must support keyboard navigation and maintain selection state as the us
 
 - `Preview` keeps the user in the assistant context.
 - `Open source` opens the underlying document or entry in a new tab or authenticated viewer.
-- `Download` is secondary and only shown when permitted and meaningful.
+- `Download` is secondary and only shown for later-phase asset types when permitted and meaningful.
 
 ### Permission-Safe Display Rules
 
@@ -313,10 +315,16 @@ The rail must support keyboard navigation and maintain selection state as the us
 
 ### Recommended Facets
 
-- Content type: `Entry`, `PDF`, `Doc`, `Image`
+Phase 1:
+
 - Department
 - Date range
 - Sort: `Relevance` by default, optional `Newest`
+
+Later phases:
+
+- Content type: `Entry`, `PDF`, `Doc`, `Image`
+- Indexing status: `Processing`, `Ready`, `Failed`
 
 ### Privileged Facets
 
@@ -325,7 +333,6 @@ Show these only when the user's role and access scope make them meaningful:
 - Team
 - Owner
 - Visibility scope
-- Indexing status: `Processing`, `Ready`, `Failed`
 
 ### Filter Behavior
 
@@ -339,7 +346,7 @@ Show these only when the user's role and access scope make them meaningful:
 
 | State | Trigger | UX treatment |
 | --- | --- | --- |
-| Empty | No thread yet | Trust statement, starter prompts, mode selector, and optional recent uploads for privileged users |
+| Empty | No thread yet | Trust statement, starter prompts, and mode selector |
 | Retrieving | Search or retrieval underway | Skeleton result cards plus status text such as `Searching accessible sources...` |
 | Generating answer | Evidence found and answer synthesis running | Preserve retrieved sources skeleton and show `Preparing grounded answer...` |
 | No results | No accessible matches at all | Neutral empty card with refine suggestions and filter reset action |
@@ -378,7 +385,8 @@ If saved history is introduced later:
 
 ### Accessibility
 
-- Target WCAG 2.2 AA.
+- Target WCAG 2.1 AA for Phase 1 launch, matching the PRD and architecture.
+- Track WCAG 2.2 AA improvements as follow-on usability enhancements after launch alignment is achieved.
 - Maintain strong color contrast for all text and state badges.
 - Ensure every interactive control has a visible focus state.
 - Support complete keyboard navigation across mode pills, source cards, citation chips, sheets, and dialogs.
@@ -418,8 +426,8 @@ If saved history is introduced later:
 
 - `Card`, `Badge`, `Tabs`, `Tooltip`, `ScrollArea`, `Accordion`, `Separator`, `Skeleton`
 - `Sheet` for mobile filters and evidence drawer
-- `Dialog` for upload flow
-- `Toast` or `Sonner` for upload or retry confirmation feedback
+- `Dialog` for later-phase upload flow
+- `Toast` or `Sonner` for later-phase upload or retry confirmation feedback
 
 ### New Shared Components Recommended
 
@@ -446,6 +454,12 @@ If saved history is introduced later:
 - Every substantive answer includes clickable citations.
 - Evidence can be inspected without leaving the page.
 - No-evidence and low-confidence states are explicit and useful.
-- Source cards support entries, PDFs, docs, and images.
-- Mobile users can query, filter, inspect evidence, and open sources without layout breakage.
+- Source cards support Phase 1 entry-backed results.
+- Mobile users can query, filter, inspect evidence, and open entry sources without layout breakage.
 - Blocked content is never revealed through source names, snippets, counts, or citation labels.
+
+## Post-MVP Acceptance Additions
+
+- Source cards support PDFs, docs, and images.
+- Privileged upload and indexing flows surface processing state clearly.
+- Mixed-media facets and indexing-status facets are available where relevant.

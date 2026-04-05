@@ -352,6 +352,8 @@ The MVP should optimize for validated trust and usefulness, not feature breadth.
 
 ### MVP Feature Set (Phase 1)
 
+The functional requirement inventory in this document describes the full planned assistant capability set across phases. Implementation readiness for Phase 1 is judged against this MVP feature set and its explicit deferrals; later-phase requirements such as mixed-media ingestion, saved history, and advanced quality-review tooling are not Phase 1 blockers.
+
 **Core User Journeys Supported:**
 - Priya's trusted retrieval journey over existing accessible knowledge
 - Arjun's weak-evidence journey where the system abstains instead of guessing

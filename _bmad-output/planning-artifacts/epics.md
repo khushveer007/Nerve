@@ -126,29 +126,29 @@ UX-DR1: Keep the assistant at `/ai/query` inside the existing `AppLayout` and `R
 UX-DR2: Implement the page with five primary regions: header, mode bar, main results column, context/evidence rail, and sticky composer.
 UX-DR3: On desktop, use a two-column workspace with an approximately 8/12 main transcript column and 4/12 sticky context rail.
 UX-DR4: On mobile and tablet, collapse to a single-column layout with a sticky bottom composer, a filter sheet, and an evidence sheet or drawer.
-UX-DR5: Add a header that shows the page title `Assistant`, the subtitle `Search and answer across Nerve knowledge with citations.`, and the actions `New conversation`, `Filters`, and role-gated `Add source`.
+UX-DR5: Add a header that shows the page title `Assistant`, the subtitle `Search and answer across Nerve knowledge with citations.`, and the actions `New conversation` and `Filters`; reserve role-gated `Add source` and upload-state actions for later-phase management or assistant extensions.
 UX-DR6: Replace the current disconnected-backend warning with a full-width status card that explains what is unavailable and what still works.
 UX-DR7: Implement a multiline composer with a 2-line minimum height, 6-line maximum height, `Enter` to submit, and `Shift+Enter` for newline.
 UX-DR8: Keep the currently selected mode visible adjacent to the composer and show active filters as removable chips above the composer across turns until cleared.
-UX-DR9: Provide an empty-state first-visit experience with a trust statement and 4 to 6 starter prompt chips such as policy lookup, summary, and document discovery prompts.
+UX-DR9: Provide an empty-state first-visit experience with a trust statement and 4 to 6 starter prompt chips such as policy lookup, summary, and entry discovery prompts.
 UX-DR10: Implement a segmented mode control for `Auto`, `Search`, and `Ask`, with `Auto` selected by default on first load.
 UX-DR11: Encode Auto-mode behavior so retrieval-oriented verbs resolve to search-first, synthesis-oriented prompts resolve to answer-first, and ambiguous prompts can return a mixed response.
 UX-DR12: Render search-style responses with a top summary row, visible active facets, ranked source cards, five default results, and a `Show more results` control.
-UX-DR13: Build source cards with source icon, content-type badge, title, secondary metadata, emphasized snippet or OCR excerpt, citation locator where available, and permission-safe actions for `Preview`, `Open source`, and `Download`.
+UX-DR13: Build Phase 1 source cards around entry-backed results with source icon, `Entry` badge, title, secondary metadata, emphasized snippet, citation locator where available, and permission-safe actions for `Preview` and `Open source`; extend the same pattern to PDFs, docs, images, and `Download` where meaningful in later phases.
 UX-DR14: Render answer-style responses with a concise answer card, inline citation chips attached to each substantive claim cluster, and a supporting evidence block under the answer.
 UX-DR15: Support mixed responses in `Auto` mode by combining a short grounded answer with a clearly labeled supporting source section.
-UX-DR16: Provide content-type-specific evidence previews for entries, PDFs, documents/plain text files, and images, including locators such as page number, heading path, or OCR excerpt.
+UX-DR16: Provide entry-specific evidence previews for Phase 1, then extend to PDFs, documents/plain text files, and images in later phases, including locators such as page number, heading path, or OCR excerpt where supported.
 UX-DR17: Render citation chips as short labels like `S1`, `S2`, and `S3`, optionally including page hints, with hover/focus summaries on desktop and click behavior that opens the matching evidence item.
 UX-DR18: Implement an evidence rail that shows the selected citation preview, the list of cited sources for the current answer, source actions, and status badges while preserving keyboard navigation and selection state.
 UX-DR19: Enforce permission-safe display rules in the UI by omitting blocked titles, filenames, snippets, page counts, result counts that imply hidden documents, citation labels, and tease-and-block controls.
-UX-DR20: Implement default filters for content type, department, date range, and sort, plus privileged filters for team, owner, visibility scope, and indexing status when the user's role makes them meaningful.
+UX-DR20: Implement Phase 1 default filters for department, date range, and sort, plus privileged filters for team, owner, and visibility scope when the user's role makes them meaningful; introduce content-type and indexing-status facets in later mixed-media phases.
 UX-DR21: Keep every active facet visible as a removable chip, provide `Clear all` when filters exist, and persist filter selections across turns within the current session.
 UX-DR22: Implement distinct empty, retrieving, generating-answer, no-results, no-evidence, low-confidence, source-processing, source-failed, and error states with calm, institutional copy and clear next actions.
 UX-DR23: Ensure no-evidence and low-confidence states offer specific follow-ups such as switching to `Search`, clearing filters, trying a department or document name, or reviewing related accessible sources.
 UX-DR24: Support MVP conversation continuity as an in-page transcript plus `New conversation` reset, without introducing multi-session saved history in the first replacement of `AIQuery.tsx`.
 UX-DR25: Meet UX accessibility expectations for visible focus, keyboard navigation, `aria-live` status updates, descriptive citation accessible names, 44x44 touch targets, and text alternatives for image previews and OCR-backed source cards.
 UX-DR26: Reuse existing Nerve visual and interaction patterns where possible, including `Card`, `Badge`, `Tabs`, `Tooltip`, `ScrollArea`, `Accordion`, `Separator`, `Skeleton`, `Sheet`, `Dialog`, `Toast`/`Sonner`, and browse-style filter conventions.
-UX-DR27: Ensure launch UX acceptance includes clickable citations on every substantive answer, evidence inspection without leaving the page, mobile usability for querying/filtering/evidence/source access, and zero blocked-content leakage through names, snippets, counts, or citation labels.
+UX-DR27: Ensure Phase 1 launch UX acceptance includes clickable citations on every substantive answer, evidence inspection without leaving the page, mobile usability for querying/filtering/evidence/source access over entry-backed results, and zero blocked-content leakage through names, snippets, counts, or citation labels; expand acceptance later for mixed-media cards and upload/indexing states.
 
 ### FR Coverage Map
 
@@ -186,10 +186,10 @@ FR31: Epic 2 - Status visibility for processing, ready, failed, and unavailable 
 FR32: Epic 3 - Asset readiness and indexed-status monitoring
 FR33: Epic 3 - Retry and reindex controls for failed processing
 FR34: Epic 3 - Diagnostics for retrieval, citation, and permission issues
-FR35: Epic 4 - Usage, citation, no-answer, and ingestion-signal review for continuous improvement
+FR35: Epic 5 - Usage, citation, no-answer, and ingestion-signal review for continuous improvement
 FR36: Epic 4 - Saved assistant thread list
 FR37: Epic 4 - Reopen and continue prior conversations
-FR38: Epic 4 - Persisted citations with saved assistant answers
+FR38: Epic 4 and Epic 5 - Historical citation continuity plus persisted answer evidence review
 
 ## Epic List
 
@@ -208,10 +208,15 @@ Admins and operators can monitor indexed asset readiness, retry or reindex faile
 **FRs covered:** FR19, FR32, FR33, FR34.
 **Implementation notes:** Phase 3 rollout. Build operator-facing controls on top of the knowledge jobs, asset states, and citation traceability established in the earlier epics.
 
-### Epic 4: Add Conversation Memory and Quality Feedback Loops
-Returning users can reopen trusted conversations with preserved evidence, while product and operations teams can review usage, citation coverage, no-answer behavior, and ingestion signals to improve the assistant over time.
-**FRs covered:** FR35, FR36, FR37, FR38.
-**Implementation notes:** Later-phase expansion. Add thread persistence, stored citation history, and continuous-improvement analytics once the request, citation, and operational event model is stable from the earlier rollout phases.
+### Epic 4: Add Conversation Memory and Historical Citation Continuity
+Returning users can reopen trusted conversations with preserved evidence and citation context so they can continue prior research without losing trust.
+**FRs covered:** FR36, FR37, FR38.
+**Implementation notes:** Later-phase expansion. Add thread persistence, stored citation history, and thread reopening once the request and citation model are stable from the earlier rollout phases.
+
+### Epic 5: Add Quality Insights and Reviewable Answer Evidence
+Product and operations teams can review usage, citation coverage, no-answer behavior, ingestion signals, and persisted answer evidence so they can improve the assistant over time.
+**FRs covered:** FR35, FR38.
+**Implementation notes:** Later-phase expansion. Add continuous-improvement analytics and reviewable persisted evidence once operational events and historical answer storage are stable from the earlier rollout phases.
 
 ## Epic 1: Replace AIQuery with a Trusted Entry Assistant
 
@@ -282,6 +287,11 @@ So that the first production release answers from live institutional content.
 **Then** the searchable corpus is limited to existing entry-backed knowledge
 **And** no file, PDF, or image upload content is referenced yet.
 
+**Given** indexed entry content is available
+**When** an authenticated user submits a known-item or discovery query for that content
+**Then** the assistant can return at least one accessible entry-backed result from the indexed corpus
+**And** the result is identifiable as Phase 1 entry content rather than a later mixed-media source type.
+
 ### Story 1.3: Deliver Permission-Safe Entry Search
 
 As an authenticated Nerve user,
@@ -312,13 +322,13 @@ So that results, snippets, and source actions stay trustworthy and private.
 **Then** the leakage rate for unauthorized filenames, snippets, citations, and links is zero
 **And** the test outcome is recorded as a launch-quality gate.
 
-### Story 1.4: Add Hybrid Search, Intent Routing, and Filtered Result Lists
+### Story 1.4: Add Hybrid Search and Intent Routing for Entry Queries
 
 As an authenticated Nerve user,
 I want the assistant to return strong search results for discovery-style queries,
 So that I can quickly find the right entry without leaving the assistant workflow.
 
-**FRs implemented:** FR4, FR6, FR7, FR8, FR9, FR10, FR12, FR18
+**FRs implemented:** FR6, FR7, FR8, FR9, FR10, FR18
 
 **Acceptance Criteria:**
 
@@ -327,20 +337,45 @@ So that I can quickly find the right entry without leaving the assistant workflo
 **Then** the assistant returns a search-style response with ranked entry results
 **And** ranking combines semantic similarity, exact match behavior, and metadata-aware retrieval.
 
-**Given** a user applies supported filters such as department, content type, date range, or sort
+**Given** the query intent is ambiguous
+**When** the request is processed in `Auto` mode
+**Then** the system chooses search-style or answer-style behavior using server-side routing rules
+**And** the response shape remains explainable from the returned evidence.
+
+**Given** no accessible entries match the request
+**When** the response is returned
+**Then** the assistant shows a neutral no-results state with refinement suggestions
+**And** the user can retry without retyping the original query.
+
+### Story 1.4a: Add Filtered Entry Result Lists and Phase 1 Facets
+
+As an authenticated Nerve user,
+I want to narrow entry-backed results with visible filters,
+So that I can refine discovery without leaving the assistant workflow.
+
+**FRs implemented:** FR4, FR10, FR12
+
+**Acceptance Criteria:**
+
+**Given** a user applies supported Phase 1 filters such as department, date range, or sort
 **When** a query is submitted
 **Then** the API applies those filters to retrieval and ranking
-**And** the active filters remain visible as removable chips across turns until cleared.
+**And** active filters remain visible as removable chips across turns until cleared.
+
+**Given** privileged entry metadata is available and the user's role permits it
+**When** filter controls are shown
+**Then** optional facets such as team, owner, and visibility scope may appear
+**And** later-phase facets such as indexing status are not treated as Phase 1 requirements.
 
 **Given** more than five accessible results are found
 **When** the result group is displayed
 **Then** the page shows a summary row with result count and active facets
 **And** the UI initially renders five results with a `Show more results` control.
 
-**Given** no accessible entries match the request
-**When** the response is returned
-**Then** the assistant shows a neutral no-results state with refinement suggestions
-**And** the user can retry without retyping the original query.
+**Given** entry-backed results are rendered
+**When** the result list is displayed
+**Then** each result includes entry-specific descriptors such as title, metadata, and snippet content
+**And** the presentation remains clearly scoped to Phase 1 entry sources.
 
 ### Story 1.5: Deliver Grounded Ask Mode with Server-Enforced No-Answer Behavior
 
@@ -556,13 +591,13 @@ So that assistant retrieval respects team, owner, and explicit audience boundari
 **Then** ACL evaluation still prevents unauthorized access
 **And** permission safety takes precedence over index freshness.
 
-### Story 2.5: Deliver Mixed-Media Search, Preview, and Source Actions
+### Story 2.5: Deliver Mixed-Media Search and Preview
 
 As an authenticated user,
 I want one assistant experience across entries, PDFs, docs, and images,
 So that I can discover and inspect knowledge regardless of source format.
 
-**FRs implemented:** FR11, FR12, FR13, FR29
+**FRs implemented:** FR11, FR12, FR29
 
 **Acceptance Criteria:**
 
@@ -576,15 +611,30 @@ So that I can discover and inspect knowledge regardless of source format.
 **Then** entries show body excerpts, PDFs show page-based excerpts, documents show section excerpts, and images show OCR-backed text or thumbnail context
 **And** each preview remains permission-safe.
 
+**Given** a user does not have access to a source
+**When** results and previews are rendered
+**Then** the source is omitted entirely rather than shown as a disabled teaser
+**And** no hidden-document counts are implied.
+
+### Story 2.5a: Deliver Authenticated Mixed-Media Source Open and Download Actions
+
+As an authenticated user,
+I want permitted mixed-media sources to open through trusted in-app flows,
+So that I can inspect the original source without breaking access control.
+
+**FRs implemented:** FR13
+
+**Acceptance Criteria:**
+
 **Given** a user has access to a result source
 **When** they choose `Open source` or `Download`
 **Then** the assistant uses authenticated source-open flows or download proxies
 **And** those actions are shown only when meaningful and allowed.
 
-**Given** a user does not have access to a source
-**When** results and previews are rendered
-**Then** the source is omitted entirely rather than shown as a disabled teaser
-**And** no hidden-document counts are implied.
+**Given** a source action is not allowed for the current user or asset type
+**When** result actions are rendered
+**Then** the unavailable action is omitted rather than teased
+**And** no protected source details are leaked.
 
 ### Story 2.6: Reflect Source Lifecycle Status and Content Refresh in the Assistant
 
@@ -701,9 +751,9 @@ So that I can explain and resolve trust issues with evidence.
 **And** they do not need to infer the outcome from raw logs alone.
 
 **Given** a user reports that the assistant cited the wrong source
-**When** the operator reviews the answer trace
-**Then** they can see which evidence chunks were selected and how they mapped to the final citation set
-**And** they can determine whether the issue is ranking, citation assembly, or source freshness.
+**When** the operator reviews the diagnostic record
+**Then** they can determine whether the issue most likely came from ranking, citation assembly, source freshness, or missing trace data
+**And** the system clearly indicates when deeper citation-to-source trace inspection requires Story 3.4 capabilities.
 
 **Given** an operator does not have permission to reveal certain content broadly
 **When** they use the diagnostics surface
@@ -740,9 +790,9 @@ So that I can validate or challenge what the assistant used to support a respons
 **Then** the system flags the traceability gap explicitly
 **And** the issue is treated as an operational defect rather than silently ignored.
 
-## Epic 4: Add Conversation Memory and Quality Feedback Loops
+## Epic 4: Add Conversation Memory and Historical Citation Continuity
 
-Returning users can reopen trusted conversations with preserved evidence, while product and operations teams can review usage, citation coverage, no-answer behavior, and ingestion signals to improve the assistant over time.
+Returning users can reopen trusted conversations with preserved evidence and citation context so they can continue prior research without losing trust.
 
 ### Story 4.1: Persist Assistant Threads and Message History
 
@@ -804,7 +854,11 @@ So that I can continue a trusted line of inquiry and still verify earlier answer
 **Then** the system preserves the historical citation record for auditability
 **And** current source-open actions still respect present-day authorization rules.
 
-### Story 4.3: Expose Usage and Trust Signals for Continuous Improvement
+## Epic 5: Add Quality Insights and Reviewable Answer Evidence
+
+Product and operations teams can review usage, citation coverage, no-answer behavior, ingestion signals, and persisted answer evidence so they can improve the assistant over time.
+
+### Story 5.1: Expose Usage and Trust Signals for Continuous Improvement
 
 As a product owner or operator,
 I want to review how the assistant is being used and trusted,
@@ -834,7 +888,7 @@ So that I can prioritize relevance, usability, and rollout improvements.
 **Then** usage and trust outcomes can be interpreted alongside operating cost indicators
 **And** the surface supports informed tuning decisions rather than raw prompt counting alone.
 
-### Story 4.4: Support Evaluation and Quality Review with Persisted Answer Evidence
+### Story 5.2: Support Evaluation and Quality Review with Persisted Answer Evidence
 
 As an operator or product stakeholder,
 I want stored answers to retain enough evidence context for later review,
