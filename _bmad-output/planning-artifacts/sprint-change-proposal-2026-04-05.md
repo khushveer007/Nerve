@@ -3,16 +3,19 @@ date: 2026-04-05
 project: Nerve
 mode: batch
 status: applied
+changeTrigger: Planning-readiness defects identified in implementation-readiness-report-2026-04-05.md
 sourceReport: /home/opsa/Work/Nerve/_bmad-output/planning-artifacts/implementation-readiness-report-2026-04-05.md
+scopeClassification: moderate
+approvedBy: Opsa
+approvedOn: 2026-04-05
+appliedOn: 2026-04-05
 assumptions:
-  - The implementation-readiness report is the change trigger and evidence package for this course-correction pass.
-  - Batch mode is appropriate because the request referenced an existing report rather than asking for an interactive refinement loop.
-  - No implementation rollback is required because the issues were discovered at planning/readiness time rather than after coded delivery.
+  - The readiness report dated 2026-04-05 is the agreed trigger and evidence package for this course-correction pass.
+  - The defects were found before implementation started, so no rollback of coded work is required.
+  - The PRD, architecture, and UX specification remain directionally valid; the main corrections are in backlog structure and story acceptance criteria.
 affectedArtifacts:
   - /home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md
-  - /home/opsa/Work/Nerve/_bmad-output/planning-artifacts/ux-design-specification.md
-  - /home/opsa/Work/Nerve/_bmad-output/planning-artifacts/prd.md
-  - /home/opsa/Work/Nerve/_bmad-output/planning-artifacts/architecture.md
+  - /home/opsa/Work/Nerve/_bmad-output/planning-artifacts/implementation-readiness-report-2026-04-05.md
 ---
 
 # Sprint Change Proposal
@@ -25,320 +28,143 @@ affectedArtifacts:
 
 ## 1. Issue Summary
 
-The planning set is close to implementation-ready, but the readiness assessment surfaced a cluster of scope and sequencing defects that should be corrected before sprint planning or story execution begins.
+The project does not need a product-direction reset. It needs a backlog-structure correction before sprint planning begins.
 
-The most important trigger is the Epic 3 sequencing defect: Story 3.3 currently promises citation-trace diagnostics that are only introduced in Story 3.4. The report also identified a wider scope-drift pattern:
+The trigger is the readiness assessment finding that [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md) contains one explicit forward dependency plus several planning-hygiene defects:
 
-- Epic 1 Story 1.2 does not yet prove user-visible Phase 1 value.
-- Epic 1 Story 1.4 is oversized and mixes retrieval logic, filters, and result-list UX.
-- Epic 2 Story 2.5 is oversized and mixes mixed-media rendering with source-open/download behavior.
-- Epic 4 mixes two different value streams: conversation memory and product/operations quality review.
-- The UX specification treats mixed-media support and upload flows as launch behavior even though the PRD and architecture define Phase 1 as entry-only.
-- The UX specification targets `WCAG 2.2 AA`, while the PRD and architecture specify `WCAG 2.1 AA`.
+- Story 3.3 depends on future Story 3.4 behavior, which breaks the rule that stories must be independently completable in sequence.
+- Epic 2's FR summary and FR coverage map do not match the actual story-level ownership of FR12 and FR13.
+- Some approved UX requirements are documented in the requirements inventory but not carried into testable story acceptance criteria.
+- Story 1.7 bundles telemetry, evaluation, and rollout-governance work into one story that is larger than the intended single-dev-agent scope.
 
-If these issues are left unresolved, the backlog will look more complete than it really is, QA acceptance will target the wrong launch surface, and story sequencing will produce avoidable rework.
+These issues were discovered during implementation-readiness review, not during coding. That means the safest correction is to fix the planning artifacts now, then rerun readiness before sprint planning or implementation.
 
 ## 2. Impact Analysis
 
 ### Epic Impact
 
-- **Epic 1** remains viable, but its Phase 1 story boundaries need tightening so the first release is clearly entry-backed and testable.
-- **Epic 2** remains viable, but Story 2.5 should be split so mixed-media rendering and authenticated source actions can be estimated and delivered independently.
-- **Epic 3** remains viable, but Story 3.3 must be narrowed or resequenced to remove the forward dependency on Story 3.4.
-- **Epic 4** should be restructured because it combines end-user conversation memory with internal quality-review capabilities that do not form one cohesive user-value theme.
-- A **new Epic 5** is recommended so quality insights and reviewable answer evidence have their own backlog lane.
+- **Epic 1** remains valid and retains the same user-value outcome. It needs acceptance-criteria additions for UX traceability and one story split so rollout guardrails are easier to implement and test.
+- **Epic 2** remains valid and does not need resequencing. It needs traceability cleanup so the epic summary and FR coverage map reflect the mixed-media story set already written.
+- **Epic 3** remains valid, but Story 3.3 must be narrowed so it no longer references future Story 3.4 capability.
+- **Epic 4** and **Epic 5** remain valid and are not directly changed by this proposal.
+
+### Story Impact
+
+- **Story 1.1** needs acceptance criteria for the sidebar label rename and accessible status announcements.
+- **Story 1.4a** needs explicit `Clear all` filter behavior in acceptance criteria.
+- **Story 1.6** needs an explicit accessibility criterion for touch-target sizing on citation and evidence actions.
+- **Story 1.7** should be split into a telemetry story and an evaluation/launch-guardrails story.
+- **Story 2.5** needs an accessibility criterion for image/OCR-backed text alternatives.
+- **Story 3.3** needs its diagnostic scope narrowed to remove the forward dependency on Story 3.4.
 
 ### Artifact Conflicts
 
-- **PRD:** Largely authoritative already. The main issue is traceability, not product intent. The MVP and explicit deferrals are clear, but a small note would help readers understand that the FR inventory spans multiple phases.
-- **Architecture:** Already aligned with an entry-only Phase 1, Phase 2 mixed-media ingestion, and later saved history/analytics. No blocking architecture rewrite is required.
-- **UX Design:** Requires the largest correction because launch examples, supported source types, filters, upload flow placement, and accessibility target are not aligned to the Phase 1 contract.
-- **Epics:** Require the most direct backlog surgery because sizing, sequencing, and epic grouping issues live here.
+- **PRD:** No direct text change required. The PRD already defines the product boundary and phased scope clearly enough.
+- **Architecture:** No direct text change required. The architecture already supports the intended phased rollout and does not create the dependency or traceability defects.
+- **UX Design:** No direct text change required. The UX spec already contains the missing requirements; the problem is that those requirements were not translated into story-level acceptance criteria.
+- **Epics:** Direct edits are required. This is the artifact where the actionable correction belongs.
 
 ### Technical and Delivery Impact
 
-- Current estimates for Stories 1.4 and 2.5 are likely inflated by bundled concerns.
-- QA and readiness checks cannot be trusted until the launch contract explicitly says Phase 1 is entry-only.
-- Accessibility testing scope remains unstable until one target standard is selected and repeated consistently.
-- Dev handoff will be cleaner after story splits because retrieval/ranking, result UX, preview behavior, and source actions can be validated separately.
+- Sprint planning should wait until the epic/story corrections are applied.
+- Implementation estimates for Epic 1 become more reliable after Story 1.7 is split.
+- QA acceptance becomes safer after UX requirements move from inventory form into story-level criteria.
+- No code, infrastructure, or deployment rollback is required.
 
 ## 3. Checklist Execution Summary
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| 1.1 Triggering story identified | [x] Done | Story 3.3 first exposed the sequencing defect; the readiness report then identified related story and scope issues across Stories 1.2, 1.4, 2.5 and Epic 4. |
-| 1.2 Core problem defined | [x] Done | Primary issue type: misunderstanding of phased requirements and over-compressed story scopes. |
-| 1.3 Evidence gathered | [x] Done | Evidence comes from the readiness report plus direct review of `epics.md`, `ux-design-specification.md`, `prd.md`, and `architecture.md`. |
-| 2.1 Current epic assessed | [x] Done | Affected epics can still ship with modification; none need to be discarded. |
-| 2.2 Epic-level changes determined | [x] Done | Epic 4 split recommended; Epic 1 and Epic 2 story splits recommended; Epic 3 sequencing fix required. |
-| 2.3 Remaining epics reviewed | [x] Done | Future epics remain valid once phase boundaries and story dependencies are clarified. |
-| 2.4 New/obsolete epic check | [x] Done | Add a new Epic 5 for quality insights and reviewable answer evidence; no epic is obsolete. |
-| 2.5 Epic order and priority reviewed | [x] Done | Keep Phase 1 entry-only work first; ensure citation traceability precedes deep citation diagnostics. |
-| 3.1 PRD conflict review | [x] Done | No core-goal conflict; add one scope-traceability clarification note. |
-| 3.2 Architecture conflict review | [x] Done | Architecture already matches the intended phased rollout; no major text change required. |
-| 3.3 UX conflict review | [x] Done | Launch examples, acceptance, facets, uploads, and accessibility target need revision. |
-| 3.4 Other artifact impact review | [x] Done | Sprint planning, QA acceptance, and implementation readiness must be rerun after artifact updates. |
-| 4.1 Direct adjustment evaluated | [x] Done | Viable. Effort: Medium. Risk: Low-Medium. |
-| 4.2 Potential rollback evaluated | [x] Done | Not viable or needed. No implementation rollback exists to simplify this problem. |
-| 4.3 PRD MVP review evaluated | [x] Done | Partially viable. Use a small clarification, not a fundamental MVP reduction. Effort: Low. Risk: Low. |
-| 4.4 Recommended path selected | [x] Done | Hybrid: direct artifact adjustment plus a small PRD traceability clarification. |
-| 5.1 Issue summary created | [x] Done | Included in this proposal. |
-| 5.2 Epic and artifact impact documented | [x] Done | Included in Sections 2 and 5. |
+| 1.1 Triggering story identified | [x] Done | Story 3.3 revealed the forward dependency, with related readiness defects in Epic 1 and Epic 2. |
+| 1.2 Core problem defined | [x] Done | Issue type: misunderstanding of story sequencing and incomplete planning traceability rather than a product-strategy change. |
+| 1.3 Evidence gathered | [x] Done | Evidence comes from the readiness report and direct review of `epics.md`. |
+| 2.1 Current epic assessed | [x] Done | Epic 3 is still viable with a narrow Story 3.3 correction. |
+| 2.2 Epic-level changes determined | [x] Done | Modify Epic 1, Epic 2, and Epic 3 story definitions; no epic removal or new epic creation required. |
+| 2.3 Remaining epics reviewed | [x] Done | Epic 4 and Epic 5 remain valid as written. |
+| 2.4 Future epic invalidation/new epic check | [x] Done | No future epic is invalidated, and no new epic is required. |
+| 2.5 Epic order/priority reviewed | [x] Done | No epic resequencing required; only within-epic cleanup is needed. |
+| 3.1 PRD conflict review | [x] Done | No core PRD conflict found. |
+| 3.2 Architecture conflict review | [x] Done | No architecture contradiction found. |
+| 3.3 UX conflict review | [x] Done | UX remains valid; acceptance-criteria traceability is the missing link. |
+| 3.4 Other artifact impact review | [x] Done | Readiness should be rerun after edits; no sprint-status file was found to update yet. |
+| 4.1 Direct adjustment evaluated | [x] Done | Viable. Effort: Medium. Risk: Low. |
+| 4.2 Potential rollback evaluated | [x] Done | Not viable. No implementation rollback is needed. |
+| 4.3 PRD MVP review evaluated | [x] Done | Not viable as the primary path. MVP remains achievable without reducing scope. |
+| 4.4 Recommended path selected | [x] Done | Option 1: Direct Adjustment. |
+| 5.1 Issue summary created | [x] Done | Included in Section 1. |
+| 5.2 Epic/artifact adjustments documented | [x] Done | Included in Sections 2 and 5. |
 | 5.3 Recommended path documented | [x] Done | Included in Section 4. |
-| 5.4 MVP impact and action plan defined | [x] Done | Included in Sections 4 and 6. |
-| 5.5 Agent handoff plan established | [x] Done | Included in Section 7. |
-| 6.1 Final checklist review | [!] Action-needed | Becomes complete after approved edits are applied and readiness is rerun. |
-| 6.2 Proposal accuracy verification | [!] Action-needed | Confirm after backlog edits are merged and terminology stays consistent across docs. |
+| 5.4 MVP impact/action plan defined | [x] Done | Included in Section 6. |
+| 5.5 Handoff plan established | [x] Done | Included in Section 7. |
+| 6.1 Checklist completion review | [!] Action-needed | Becomes complete after proposal approval and artifact edits. |
+| 6.2 Proposal accuracy verification | [!] Action-needed | Final verification happens after your review. |
+| 6.3 Explicit user approval | [!] Action-needed | Pending your review. |
+| 6.4 Update sprint-status | [N/A] Skip | No `sprint-status.yaml` or `sprint-status.yml` was found in the project. |
+| 6.5 Confirm next steps and handoff | [!] Action-needed | Pending your review. |
 
 ## 4. Recommended Approach
 
 ### Selected Path
 
-**Hybrid of Option 1 (Direct Adjustment) and a light Option 3 (PRD MVP traceability clarification).**
+**Option 1: Direct Adjustment**
 
-### Why This Path
+### Rationale
 
-- The PRD and architecture already define the right product direction. The issue is mostly backlog and UX alignment, not a broken product strategy.
-- There is no implementation rollback to gain value from, so rollback would create churn without reducing risk.
-- A focused document pass can remove the sequencing defect, improve story sizing, and make the launch contract testable without changing the MVP itself.
+- The product intent is still correct.
+- The defects are local to backlog structure, story sizing, and acceptance-criteria traceability.
+- Fixing the backlog now is lower-risk and faster than changing the PRD or architecture.
+- This path preserves momentum while preventing avoidable implementation churn.
 
 ### Effort, Risk, and Timeline Impact
 
 - **Effort:** Medium
-- **Risk:** Medium before correction, Low-Medium after correction
-- **Timeline impact:** Small planning delay now to avoid larger execution and QA churn later
-
-### Recommended Delivery Shape
-
-1. Update `epics.md` to fix sequencing, split oversized stories, and separate Epic 4 into two value streams.
-2. Update `ux-design-specification.md` so launch behavior, example copy, facets, and acceptance criteria describe the same entry-only Phase 1 as the PRD and architecture.
-3. Add one clarifying note to `prd.md` so readers do not confuse the full FR inventory with Phase 1 launch criteria.
-4. Re-run implementation readiness before sprint planning.
+- **Risk:** Low
+- **Timeline impact:** Small planning delay now to prevent larger implementation and QA churn later
 
 ## 5. Detailed Change Proposals
 
 ### A. `epics.md`
 
-#### Change 1: Make Story 1.2 prove visible Phase 1 value
+#### Change 1: Correct Epic 2 FR traceability
 
-**Story:** 1.2  
+**Artifact:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)  
+**Sections:** `FR Coverage Map`, `Epic List`
+
+**OLD**
+
+```md
+FR12: Epic 1 - Source descriptors, snippets, and content-type indicators
+FR13: Epic 1 - Authorized source-open actions from results
+```
+
+```md
+### Epic 2: Expand the Assistant to Private Files, PDFs, and Images
+Admins can add governed knowledge beyond entries, and users can retrieve mixed-media content with the same permission-safe citations, source actions, and status-aware experience.
+**FRs covered:** FR11, FR22, FR23, FR24, FR26, FR27, FR28, FR29, FR30, FR31.
+```
+
+**NEW**
+
+```md
+FR12: Epic 1 and Epic 2 - Source descriptors, snippets, and content-type indicators across entry and mixed-media results
+FR13: Epic 1 and Epic 2 - Authorized source-open actions across entry and mixed-media sources
+```
+
+```md
+### Epic 2: Expand the Assistant to Private Files, PDFs, and Images
+Admins can add governed knowledge beyond entries, and users can retrieve mixed-media content with the same permission-safe citations, source actions, and status-aware experience.
+**FRs covered:** FR11, FR12, FR13, FR22, FR23, FR24, FR26, FR27, FR28, FR29, FR30, FR31.
+```
+
+**Rationale:** Story 2.5 and Story 2.5a already implement FR12 and FR13. The epic summary and FR coverage map should match that actual ownership.
+
+#### Change 2: Remove the forward dependency from Story 3.3
+
+**Artifact:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)  
+**Story:** `3.3`  
 **Section:** Acceptance Criteria
 
 **OLD**
-
-```md
-**Given** existing Nerve entries are present
-**When** the entry indexing flow runs
-**Then** each eligible entry is represented as a knowledge asset with versioned chunked content and citation locator metadata
-**And** entry metadata needed for ranking and filtering is preserved.
-
-**Given** Phase 1 is active
-**When** assistant queries run
-**Then** the searchable corpus is limited to existing entry-backed knowledge
-**And** no file, PDF, or image upload content is referenced yet.
-```
-
-**NEW**
-
-```md
-**Given** existing Nerve entries are present
-**When** the entry indexing flow runs
-**Then** each eligible entry is represented as a knowledge asset with versioned chunked content and citation locator metadata
-**And** entry metadata needed for ranking and filtering is preserved.
-
-**Given** Phase 1 is active
-**When** assistant queries run
-**Then** the searchable corpus is limited to existing entry-backed knowledge
-**And** no file, PDF, or image upload content is referenced yet.
-
-**Given** indexed entry content is available
-**When** an authenticated user submits a known-item or discovery query for that content
-**Then** the assistant can return at least one accessible entry-backed result from the indexed corpus
-**And** the result is identifiable as Phase 1 entry content rather than a later mixed-media source type.
-```
-
-**Rationale:** Story 1.2 currently reads like infrastructure only. This addition makes the story testable as user-facing value without pulling in later preview or open-source behavior.
-
-#### Change 2: Split Story 1.4 into retrieval logic and filtered-result UX
-
-**Story:** 1.4  
-**Section:** Title, scope, and acceptance criteria
-
-**OLD**
-
-```md
-### Story 1.4: Add Hybrid Search, Intent Routing, and Filtered Result Lists
-```
-
-```md
-**Given** a user submits a known-item or discovery query in `Search` mode or `Auto` mode
-**When** the request is processed
-**Then** the assistant returns a search-style response with ranked entry results
-**And** ranking combines semantic similarity, exact match behavior, and metadata-aware retrieval.
-
-**Given** a user applies supported filters such as department, content type, date range, or sort
-**When** a query is submitted
-**Then** the API applies those filters to retrieval and ranking
-**And** the active filters remain visible as removable chips across turns until cleared.
-
-**Given** more than five accessible results are found
-**When** the result group is displayed
-**Then** the page shows a summary row with result count and active facets
-**And** the UI initially renders five results with a `Show more results` control.
-
-**Given** no accessible entries match the request
-**When** the response is returned
-**Then** the assistant shows a neutral no-results state with refinement suggestions
-**And** the user can retry without retyping the original query.
-```
-
-**NEW**
-
-```md
-### Story 1.4: Add Hybrid Search and Intent Routing for Entry Queries
-```
-
-```md
-**Given** a user submits a known-item or discovery query in `Search` mode or `Auto` mode
-**When** the request is processed
-**Then** the assistant returns a search-style response with ranked entry results
-**And** ranking combines semantic similarity, exact match behavior, and metadata-aware retrieval.
-
-**Given** the query intent is ambiguous
-**When** the request is processed in `Auto` mode
-**Then** the system chooses search-style or answer-style behavior using server-side routing rules
-**And** the response shape remains explainable from the returned evidence.
-
-**Given** no accessible entries match the request
-**When** the response is returned
-**Then** the assistant shows a neutral no-results state with refinement suggestions
-**And** the user can retry without retyping the original query.
-```
-
-```md
-### Story 1.4a: Add Filtered Entry Result Lists and Phase 1 Facets
-
-As an authenticated Nerve user,
-I want to narrow entry-backed results with visible filters,
-So that I can refine discovery without leaving the assistant workflow.
-
-**FRs implemented:** FR4, FR10, FR12
-
-**Acceptance Criteria:**
-
-**Given** a user applies supported Phase 1 filters such as department, date range, or sort
-**When** a query is submitted
-**Then** the API applies those filters to retrieval and ranking
-**And** active filters remain visible as removable chips across turns until cleared.
-
-**Given** privileged entry metadata is available and the user's role permits it
-**When** filter controls are shown
-**Then** optional facets such as team, owner, and visibility scope may appear
-**And** later-phase facets such as indexing status are not treated as Phase 1 requirements.
-
-**Given** more than five accessible results are found
-**When** the result group is displayed
-**Then** the page shows a summary row with result count and active facets
-**And** the UI initially renders five results with a `Show more results` control.
-```
-
-**Rationale:** This keeps retrieval and intent logic separate from result refinement and display behavior, and it makes the phase boundary around filters explicit.
-
-#### Change 3: Split Story 2.5 into mixed-media rendering and source actions
-
-**Story:** 2.5  
-**Section:** Title, scope, and acceptance criteria
-
-**OLD**
-
-```md
-### Story 2.5: Deliver Mixed-Media Search, Preview, and Source Actions
-```
-
-```md
-**Given** a user submits a query after mixed-media assets are indexed
-**When** results are returned
-**Then** the assistant can rank and display entries, PDFs, docs, and images in one result set
-**And** each result includes the correct content-type badge, metadata, and snippet style.
-
-**Given** a result is selected for preview
-**When** the evidence rail or preview surface opens
-**Then** entries show body excerpts, PDFs show page-based excerpts, documents show section excerpts, and images show OCR-backed text or thumbnail context
-**And** each preview remains permission-safe.
-
-**Given** a user has access to a result source
-**When** they choose `Open source` or `Download`
-**Then** the assistant uses authenticated source-open flows or download proxies
-**And** those actions are shown only when meaningful and allowed.
-
-**Given** a user does not have access to a source
-**When** results and previews are rendered
-**Then** the source is omitted entirely rather than shown as a disabled teaser
-**And** no hidden-document counts are implied.
-```
-
-**NEW**
-
-```md
-### Story 2.5: Deliver Mixed-Media Search and Preview
-```
-
-```md
-**Given** a user submits a query after mixed-media assets are indexed
-**When** results are returned
-**Then** the assistant can rank and display entries, PDFs, docs, and images in one result set
-**And** each result includes the correct content-type badge, metadata, and snippet style.
-
-**Given** a result is selected for preview
-**When** the evidence rail or preview surface opens
-**Then** entries show body excerpts, PDFs show page-based excerpts, documents show section excerpts, and images show OCR-backed text or thumbnail context
-**And** each preview remains permission-safe.
-
-**Given** a user does not have access to a source
-**When** results and previews are rendered
-**Then** the source is omitted entirely rather than shown as a disabled teaser
-**And** no hidden-document counts are implied.
-```
-
-```md
-### Story 2.5a: Deliver Authenticated Mixed-Media Source Open and Download Actions
-
-As an authenticated user,
-I want permitted mixed-media sources to open through trusted in-app flows,
-So that I can inspect the original source without breaking access control.
-
-**FRs implemented:** FR13
-
-**Acceptance Criteria:**
-
-**Given** a user has access to a result source
-**When** they choose `Open source` or `Download`
-**Then** the assistant uses authenticated source-open flows or download proxies
-**And** those actions are shown only when meaningful and allowed.
-
-**Given** a source action is not allowed for the current user or asset type
-**When** result actions are rendered
-**Then** the unavailable action is omitted rather than teased
-**And** no protected source details are leaked.
-```
-
-**Rationale:** Rendering mixed-media results is already substantial. Splitting source-open behavior creates cleaner estimation and testing boundaries.
-
-#### Change 4: Remove the Story 3.3 forward dependency on Story 3.4
-
-**Story:** 3.3  
-**Section:** Acceptance Criteria
-
-**OLD**
-
-```md
-**Given** a user reports that the assistant cited the wrong source
-**When** the operator reviews the answer trace
-**Then** they can see which evidence chunks were selected and how they mapped to the final citation set
-**And** they can determine whether the issue is ranking, citation assembly, or source freshness.
-```
-
-**NEW**
 
 ```md
 **Given** a user reports that the assistant cited the wrong source
@@ -347,209 +173,225 @@ So that I can inspect the original source without breaking access control.
 **And** the system clearly indicates when deeper citation-to-source trace inspection requires Story 3.4 capabilities.
 ```
 
-**Rationale:** Story 3.3 should stop at categorizing the problem. Detailed citation-to-source trace inspection belongs in Story 3.4.
+**NEW**
 
-#### Change 5: Split Epic 4 into conversation memory and quality insights
+```md
+**Given** a user reports that the assistant cited the wrong source
+**When** the operator reviews the diagnostic record
+**Then** they can determine whether the issue most likely came from ranking, citation assembly, source freshness, or missing trace data
+**And** the system clearly labels when the available diagnostic record is insufficient for a source-level conclusion.
+```
 
-**Epic:** 4  
-**Section:** Epic title, summary, and story grouping
+**Rationale:** Story 3.3 should stand on its own as a diagnostics story. Story 3.4 can remain a later traceability enhancement without being required for Story 3.3 completion.
+
+#### Change 3: Add missing UX-DR1 and UX-DR25 traceability to Story 1.1
+
+**Artifact:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)  
+**Story:** `1.1`  
+**Section:** Acceptance Criteria
 
 **OLD**
 
 ```md
-## Epic 4: Add Conversation Memory and Quality Feedback Loops
-
-Returning users can reopen trusted conversations with preserved evidence, while product and operations teams can review usage, citation coverage, no-answer behavior, and ingestion signals to improve the assistant over time.
+**Given** the assistant page is opened for the first time in a session
+**When** no query has been submitted yet
+**Then** the page shows the `Assistant` title, helper text, `Auto/Search/Ask` mode controls, a sticky composer, and starter prompts
+**And** `Auto` is the default selected mode.
 ```
 
 **NEW**
 
 ```md
-## Epic 4: Add Conversation Memory and Historical Citation Continuity
+**Given** the assistant page is opened for the first time in a session
+**When** no query has been submitted yet
+**Then** the page shows the `Assistant` title, helper text, `Auto/Search/Ask` mode controls, a sticky composer, and starter prompts
+**And** `Auto` is the default selected mode.
 
-Returning users can reopen trusted conversations with preserved evidence and citation context so they can continue prior research without losing trust.
+**Given** the updated assistant route is visible in the main application shell
+**When** navigation and page chrome are rendered
+**Then** the sidebar label reads `Assistant` while the route remains `/ai/query`
+**And** the page continues to use the existing brownfield navigation structure.
+
+**Given** the assistant enters retrieving, generating, no-answer, or error states
+**When** the visible status changes
+**Then** the page announces the change through an `aria-live` region
+**And** screen-reader users receive the same state guidance shown visually.
 ```
 
-```md
-## Epic 5: Add Quality Insights and Reviewable Answer Evidence
+**Rationale:** The UX spec already requires the sidebar rename and accessible state announcements. They need to be made testable in the story.
 
-Product and operations teams can review usage, citation coverage, no-answer behavior, ingestion signals, and persisted answer evidence so they can improve the assistant over time.
-```
+#### Change 4: Add explicit `Clear all` filter behavior to Story 1.4a
 
-**Recommended regrouping**
-
-- Keep in **Epic 4**:
-  - Story 4.1 Persist Assistant Threads and Message History
-  - Story 4.2 Reopen Prior Conversations with Preserved Citation Context
-- Move to **Epic 5**:
-  - Story 5.1 Expose Usage and Trust Signals for Continuous Improvement (former 4.3)
-  - Story 5.2 Support Evaluation and Quality Review with Persisted Answer Evidence (former 4.4)
-
-**Rationale:** Conversation memory is an end-user continuity theme. Quality dashboards and evidence review are an internal operational/product theme. Keeping them together obscures priority and ownership.
-
-### B. `ux-design-specification.md`
-
-#### Change 6: Reframe launch behavior as entry-only and move mixed-media/upload behaviors to later phases
-
-**Section:** Primary Flows, Result Presentation, Filters, and Launch Acceptance
+**Artifact:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)  
+**Story:** `1.4a`  
+**Section:** Acceptance Criteria
 
 **OLD**
 
 ```md
-The page should show ... starter chips such as `Find a policy PDF`, `Summarize attendance guidance`, `Show recent admissions documents`, and `What do the documents say about placement updates?`
-```
-
-```md
-The user asks something like `find the PDF about attendance` or `show documents related to admissions`.
-```
-
-```md
-### 6. Upload And Indexing Flow
-For permitted roles, the page header includes `Add source`.
-```
-
-```md
-- Source cards support entries, PDFs, docs, and images.
-```
-
-```md
-- Content type: `Entry`, `PDF`, `Doc`, `Image`
-- Indexing status: `Processing`, `Ready`, `Failed`
+**Given** a user applies supported Phase 1 filters such as department, date range, or sort
+**When** a query is submitted
+**Then** the API applies those filters to retrieval and ranking
+**And** active filters remain visible as removable chips across turns until cleared.
 ```
 
 **NEW**
 
 ```md
-The page should show ... starter chips such as `Find the attendance guidance entry`, `Summarize attendance guidance`, `Show recent admissions entries`, and `What does Nerve say about placement updates?`
+**Given** a user applies supported Phase 1 filters such as department, date range, or sort
+**When** a query is submitted
+**Then** the API applies those filters to retrieval and ranking
+**And** active filters remain visible as removable chips across turns until cleared.
+
+**Given** one or more filters are active
+**When** the user chooses `Clear all`
+**Then** the active filter set is removed in one action
+**And** the next query runs without the previously applied facets unless the user selects them again.
 ```
 
-```md
-The user asks something like `find the attendance guidance entry` or `show admissions entries related to scholarship deadlines`.
-```
+**Rationale:** `Clear all` is a retained UX requirement and should be directly testable.
 
-```md
-### 6. Future Upload And Indexing Flow (Phase 2+)
-For permitted roles, a later-phase assistant or management surface may include `Add source`, upload status, and source processing visibility. These capabilities are not part of Phase 1 launch acceptance.
-```
+#### Change 5: Add explicit accessibility acceptance criteria where the UX spec expects them
 
-```md
-### Recommended Facets
-
-Phase 1:
-- Department
-- Date range
-- Sort: `Relevance` by default, optional `Newest`
-
-Phase 2+:
-- Content type: `Entry`, `PDF`, `Doc`, `Image`
-- Indexing status: `Processing`, `Ready`, `Failed`
-
-Privileged Phase 1 facets when entry metadata makes them meaningful:
-- Team
-- Owner
-- Visibility scope
-```
-
-```md
-## Launch Acceptance Checklist
-
-- The page still lives at `/ai/query` and fits inside the existing Nerve shell.
-- `Auto`, `Search`, and `Ask` are understandable without documentation.
-- Search-style and answer-style responses feel distinct and intentional.
-- Every substantive answer includes clickable citations.
-- Evidence can be inspected without leaving the page.
-- No-evidence and low-confidence states are explicit and useful.
-- Source cards support Phase 1 entry-backed results.
-- Mobile users can query, filter, inspect evidence, and open entry sources without layout breakage.
-- Blocked content is never revealed through source names, snippets, counts, or citation labels.
-
-### Post-MVP Acceptance Additions
-
-- Source cards support PDFs, docs, and images.
-- Privileged upload and indexing flows surface processing state clearly.
-- Mixed-media facets and indexing-status facets are available where relevant.
-```
-
-**Rationale:** The UX spec currently describes a richer launch than the PRD and architecture allow. This rewrite keeps the design ambitious while making the launch gate honest.
-
-#### Change 7: Align accessibility target with the authoritative product documents
-
-**Section:** Accessibility
+**Artifact:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)  
+**Stories:** `1.6`, `2.5`
 
 **OLD**
 
 ```md
-- Target WCAG 2.2 AA.
+**Given** the user navigates citations with keyboard only
+**When** citation chips and evidence items receive focus
+**Then** focus order remains clear and visible
+**And** citation controls expose descriptive accessible names for screen readers.
+```
+
+```md
+**Given** a result is selected for preview
+**When** the evidence rail or preview surface opens
+**Then** entries show body excerpts, PDFs show page-based excerpts, documents show section excerpts, and images show OCR-backed text or thumbnail context
+**And** each preview remains permission-safe.
 ```
 
 **NEW**
 
 ```md
-- Target WCAG 2.1 AA for Phase 1 launch, matching the PRD and architecture.
-- Track WCAG 2.2 AA improvements as follow-on usability enhancements after launch alignment is achieved.
+**Given** the user navigates citations with keyboard only
+**When** citation chips and evidence items receive focus
+**Then** focus order remains clear and visible
+**And** citation controls expose descriptive accessible names for screen readers.
+
+**Given** citation chips or evidence actions are rendered on touch-capable devices
+**When** the user interacts with them
+**Then** the controls provide a minimum 44 by 44 interaction target
+**And** touch affordances do not remove visible focus treatment for keyboard users.
 ```
 
-**Rationale:** One accessibility target must drive design, QA, and implementation. The PRD and architecture already use `WCAG 2.1 AA`, so the UX spec should match unless leadership explicitly changes the standard everywhere.
+```md
+**Given** a result is selected for preview
+**When** the evidence rail or preview surface opens
+**Then** entries show body excerpts, PDFs show page-based excerpts, documents show section excerpts, and images show OCR-backed text or thumbnail context
+**And** each preview remains permission-safe.
 
-### C. `prd.md`
+**Given** an image-backed or OCR-backed preview is displayed
+**When** assistive technologies are used
+**Then** the preview exposes a text alternative or extracted-text equivalent
+**And** users do not need the thumbnail alone to understand the source.
+```
 
-#### Change 8: Add one scope-traceability note so the FR inventory is not mistaken for the Phase 1 launch gate
+**Rationale:** UX-DR25 spans both Phase 1 interaction controls and later mixed-media previews. The story set should carry both pieces explicitly.
 
-**Section:** `MVP Feature Set (Phase 1)` or immediately before the FR inventory
+#### Change 6: Split oversized Story 1.7 into two stories
+
+**Artifact:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)  
+**Story:** `1.7`
 
 **OLD**
 
 ```md
-### MVP Feature Set (Phase 1)
+### Story 1.7: Add Phase 1 Telemetry, Evaluation, and Rollout Guardrails
+
+As a product owner or operator,
+I want launch-quality visibility into assistant quality and failures,
+So that the entry-backed rollout can be monitored and trusted in production.
+
+**FRs implemented:** FR14, FR15, FR17, FR20, FR21, FR25
 ```
 
 **NEW**
 
 ```md
-### MVP Feature Set (Phase 1)
+### Story 1.7: Add Phase 1 Telemetry and Failure Classification
 
-The functional requirement inventory in this document describes the full planned assistant capability set across phases. Implementation readiness for Phase 1 is judged against this MVP feature set and its explicit deferrals; later-phase requirements such as mixed-media ingestion, saved history, and advanced quality-review tooling are not Phase 1 blockers.
+As a product owner or operator,
+I want request and failure telemetry for the assistant,
+So that I can observe production behavior and triage issues quickly.
+
+**FRs implemented:** FR20, FR21, FR25
 ```
 
-**Rationale:** The PRD already says the right thing, but adding this sentence will reduce repeated confusion during backlog validation and future readiness checks.
+```md
+### Story 1.8: Add Phase 1 Evaluation and Launch Guardrails
 
-### D. `architecture.md`
+As a product owner or operator,
+I want a repeatable evaluation suite for Phase 1,
+So that launch readiness is judged against grounded-answer and permission-safety expectations.
 
-#### Change 9: No blocking architecture rewrite required
+**FRs implemented:** FR14, FR15, FR17
+```
 
-**Assessment**
+**Suggested acceptance criteria for Story 1.7**
 
-- The architecture already states:
-  - Phase 1 is entry-only
-  - Phase 2 adds private uploads and OCR/extraction
-  - Phase 3 adds asset governance and operational tooling
-  - Later phases add saved threads, analytics, and tuning
-- No architecture text change is required to proceed with this course correction.
+```md
+**Given** an assistant request is processed
+**When** the request completes or fails
+**Then** the system records a request ID, stage timings, mode, no-answer outcome, and failure classification
+**And** retrieval, permission, and provider failures are distinguishable in telemetry.
 
-**Optional follow-up**
+**Given** entry indexing and retrieval activity occurs
+**When** operational signals are recorded
+**Then** the system captures freshness, request, and latency indicators needed for Phase 1 operations
+**And** the signals are available to product and engineering stakeholders.
+```
 
-- After epic restructuring, add a short cross-reference in the implementation sequence or epic-traceability section if the team wants the new Epic 5 reflected explicitly.
+**Suggested acceptance criteria for Story 1.8**
 
-## 6. MVP Impact and Action Plan
+```md
+**Given** grounded answers are produced
+**When** quality metrics are computed
+**Then** citation coverage and latency metrics are recorded
+**And** search and answer paths can be compared against their p95 targets.
+
+**Given** the Phase 1 evaluation suite is run
+**When** launch readiness is reviewed
+**Then** the suite covers exact-match, semantic, no-answer, and ACL-sensitive entry scenarios
+**And** results are available to product and engineering stakeholders.
+
+**Given** unsupported narrative answers or blocked-source leakage are detected
+**When** evaluation results are reviewed
+**Then** the release is treated as not launch-ready
+**And** remediation work is created before broader rollout.
+```
+
+**Rationale:** This split keeps each story closer to single-agent scope and separates instrumentation from launch-readiness judgment.
+
+## 6. PRD MVP Impact and High-Level Action Plan
 
 ### MVP Impact
 
-The MVP itself does **not** need to be reduced. This proposal protects the existing Phase 1 MVP by removing accidental launch inflation from the UX and backlog artifacts.
+The MVP is **not** being reduced or redefined. Phase 1 remains the entry-backed assistant replacement already defined in the PRD and architecture.
 
 ### High-Level Action Plan
 
-1. Apply the `epics.md` changes first so story sequencing and sizing are stable.
-2. Apply the `ux-design-specification.md` changes next so design acceptance matches the revised backlog.
-3. Add the PRD clarification note.
-4. Confirm the accessibility standard remains `WCAG 2.1 AA` across all planning artifacts.
-5. Re-run `bmad-check-implementation-readiness`.
-6. Proceed to `bmad-sprint-planning` only after the revised artifacts pass readiness.
+1. Update [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md) using the six proposed edits above.
+2. Recheck FR coverage and within-epic sequencing after the edits land.
+3. Rerun `bmad-check-implementation-readiness`.
+4. If the readiness check passes, proceed to sprint planning.
 
-### Dependencies and Sequencing
+### Dependency and Sequencing Notes
 
-- Story 3.4 traceability must exist before any diagnostic story depends on citation-to-source mapping.
-- Phase 1 launch acceptance must stay entry-only until Epic 2 mixed-media work is planned and approved.
-- Epic 5 quality insights should be sequenced after the event and persistence foundations from Epics 3 and 4 are available.
+- Fix Story 3.3 before any sprint planning so the backlog no longer contains a known forward dependency.
+- Apply the Story 1.7 split before estimation so Phase 1 sizing is based on the corrected story boundaries.
+- Keep FR coverage map edits synchronized with story edits to avoid reintroducing traceability drift.
 
 ## 7. Implementation Handoff
 
@@ -557,40 +399,45 @@ The MVP itself does **not** need to be reduced. This proposal protects the exist
 
 **Moderate**
 
-This is not a fundamental product reset, but it does require backlog reorganization, document edits, and a readiness re-check before implementation should start.
+This is backlog reorganization and acceptance-criteria repair work. It does not require a new product strategy, but it should be owned deliberately rather than folded casually into development.
 
-### Handoff Recipients
+### Recommended Handoff
 
 - **Product Owner / Scrum Master**
-  - Update `epics.md`
-  - Split oversized stories
-  - Remove the Story 3.3 forward dependency
-  - Introduce Epic 5 and resequence backlog priorities
-- **UX Designer**
-  - Revise launch examples, flows, and acceptance criteria in `ux-design-specification.md`
-  - Separate Phase 1 and post-MVP UX behaviors
-  - Align accessibility target to the agreed product standard
-- **Product Manager / Architect**
-  - Confirm that `WCAG 2.1 AA` remains the authoritative target
-  - Approve the small PRD clarification note
-  - Decide whether the architecture should explicitly mention the new Epic 5 grouping
-- **Development / QA**
-  - Re-estimate split stories
-  - Re-run implementation readiness after artifact changes
-  - Use the revised Phase 1 launch contract for implementation and acceptance planning
+  Responsibility: apply the backlog structure changes in [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md), confirm numbering and sequencing, and ensure traceability remains consistent.
+- **QA / Readiness Reviewer**
+  Responsibility: rerun implementation-readiness validation after the artifact updates.
+- **Development Team**
+  Responsibility: wait for the corrected backlog before estimating or implementing the affected stories.
 
 ### Success Criteria
 
-- No story depends on a capability introduced later in the backlog.
-- Phase 1 launch language is entry-only in epics, UX, PRD, and architecture.
-- Accessibility target is consistent across planning artifacts.
-- Epic groupings reflect one coherent user or business value stream each.
-- Readiness can be rerun without re-raising the same scope and sequencing findings.
+- No story references future-story capability as a condition of completion.
+- Epic summaries and FR coverage map match story-level ownership.
+- Approved UX requirements are represented in explicit, testable story acceptance criteria.
+- Story 1.7 is split into independently estimable units.
+- Readiness status improves from `NEEDS WORK` to a clean implementation-ready result.
 
-## 8. Proposed Workflow Summary
+## 8. Final Note
 
-- **Issue addressed:** planning misalignment across epic sequencing, story sizing, UX launch scope, and accessibility target
-- **Recommended change scope:** Moderate
-- **Artifacts to modify:** `epics.md`, `ux-design-specification.md`, `prd.md`
-- **Artifacts reviewed but not blocked:** `architecture.md`
-- **Route after approval:** Product Owner / Scrum Master + UX Designer, with PM/Architect signoff on the accessibility target and PRD clarification
+This proposal keeps the project on its current path while correcting the planning defects most likely to create execution churn. The key principle is simple: fix the backlog where the defects live, then revalidate before implementation starts.
+
+## 9. Approval and Handoff
+
+### Approval Status
+
+Approved by Opsa on 2026-04-05.
+
+### Handoff Route
+
+Because this change is classified as **moderate** scope, the approved handoff is:
+
+- **Primary owner:** Product Owner / Scrum Master workflow owner
+- **Primary artifact to update:** [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md)
+- **Follow-up validation:** rerun [implementation-readiness-report-2026-04-05.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/implementation-readiness-report-2026-04-05.md) workflow after edits
+
+### Immediate Next Steps
+
+1. Apply the approved backlog and acceptance-criteria edits in [epics.md](/home/opsa/Work/Nerve/_bmad-output/planning-artifacts/epics.md).
+2. Confirm FR coverage map and epic summaries remain synchronized after the edits.
+3. Rerun implementation readiness before moving into sprint planning or development.

@@ -163,8 +163,8 @@ FR8: Epic 1 - Semantic discovery for entry content
 FR9: Epic 1 - Exact-match and phrase retrieval
 FR10: Epic 1 - Metadata-aware ranking and filtering
 FR11: Epic 2 - Mixed-media retrieval across files, PDFs, and images
-FR12: Epic 1 - Source descriptors, snippets, and content-type indicators
-FR13: Epic 1 - Authorized source-open actions from results
+FR12: Epic 1 and Epic 2 - Source descriptors, snippets, and content-type indicators across entry and mixed-media results
+FR13: Epic 1 and Epic 2 - Authorized source-open actions across entry and mixed-media sources
 FR14: Epic 1 - Grounded answers from accessible evidence
 FR15: Epic 1 - Citation-backed substantive answers
 FR16: Epic 1 - Evidence inspection for each citation
@@ -200,7 +200,7 @@ Authenticated Nerve users can search and ask across existing entry knowledge in 
 
 ### Epic 2: Expand the Assistant to Private Files, PDFs, and Images
 Admins can add governed knowledge beyond entries, and users can retrieve mixed-media content with the same permission-safe citations, source actions, and status-aware experience.
-**FRs covered:** FR11, FR22, FR23, FR24, FR26, FR27, FR28, FR29, FR30, FR31.
+**FRs covered:** FR11, FR12, FR13, FR22, FR23, FR24, FR26, FR27, FR28, FR29, FR30, FR31.
 **Implementation notes:** Phase 2 rollout. Add private storage, extraction, ingestion status, asset ACL management, and mixed-media retrieval without destabilizing the phase-1 assistant flow.
 
 ### Epic 3: Give Admins and Operators Control Over Knowledge Readiness and Trust
@@ -241,6 +241,16 @@ So that I can start trusted search and question answering inside the existing ap
 **When** no query has been submitted yet
 **Then** the page shows the `Assistant` title, helper text, `Auto/Search/Ask` mode controls, a sticky composer, and starter prompts
 **And** `Auto` is the default selected mode.
+
+**Given** the updated assistant route is visible in the main application shell
+**When** navigation and page chrome are rendered
+**Then** the sidebar label reads `Assistant` while the route remains `/ai/query`
+**And** the page continues to use the existing brownfield navigation structure.
+
+**Given** the assistant enters retrieving, generating, no-answer, or error states
+**When** the visible status changes
+**Then** the page announces the change through an `aria-live` region
+**And** screen-reader users receive the same state guidance shown visually.
 
 **Given** a user has already submitted a query in the current assistant session
 **When** they refine, rephrase, or continue that query from the same workspace
@@ -362,6 +372,11 @@ So that I can refine discovery without leaving the assistant workflow.
 **Then** the API applies those filters to retrieval and ranking
 **And** active filters remain visible as removable chips across turns until cleared.
 
+**Given** one or more filters are active
+**When** the user chooses `Clear all`
+**Then** the active filter set is removed in one action
+**And** the next query runs without the previously applied facets unless the user selects them again.
+
 **Given** privileged entry metadata is available and the user's role permits it
 **When** filter controls are shown
 **Then** optional facets such as team, owner, and visibility scope may appear
@@ -427,6 +442,11 @@ So that I can verify what the assistant is claiming without leaving the trust bo
 **Then** focus order remains clear and visible
 **And** citation controls expose descriptive accessible names for screen readers.
 
+**Given** citation chips or evidence actions are rendered on touch-capable devices
+**When** the user interacts with them
+**Then** the controls provide a minimum 44 by 44 interaction target
+**And** touch affordances do not remove visible focus treatment for keyboard users.
+
 **Given** the cited source is an entry
 **When** the user chooses `Preview` or `Open source`
 **Then** the assistant shows the relevant entry excerpt or opens the authenticated entry detail flow
@@ -437,13 +457,13 @@ So that I can verify what the assistant is claiming without leaving the trust bo
 **Then** status is not conveyed by color alone
 **And** no blocked citation or snippet is shown.
 
-### Story 1.7: Add Phase 1 Telemetry, Evaluation, and Rollout Guardrails
+### Story 1.7: Add Phase 1 Telemetry and Failure Classification
 
 As a product owner or operator,
-I want launch-quality visibility into assistant quality and failures,
-So that the entry-backed rollout can be monitored and trusted in production.
+I want request and failure telemetry for the assistant,
+So that I can observe production behavior and triage issues quickly.
 
-**FRs implemented:** FR14, FR15, FR17, FR20, FR21, FR25
+**FRs implemented:** FR20, FR21, FR25
 
 **Acceptance Criteria:**
 
@@ -451,6 +471,26 @@ So that the entry-backed rollout can be monitored and trusted in production.
 **When** the request completes or fails
 **Then** the system records a request ID, stage timings, mode, no-answer outcome, and failure classification
 **And** retrieval, permission, and provider failures are distinguishable in telemetry.
+
+**Given** entry indexing and retrieval activity occurs
+**When** operational signals are recorded
+**Then** the system captures freshness, request, and latency indicators needed for Phase 1 operations
+**And** the signals are available to product and engineering stakeholders.
+
+**Given** regressions appear after rollout
+**When** operators inspect the assistant signals
+**Then** they can identify whether the issue is retrieval quality, permission enforcement, or downstream provider instability
+**And** the rollout can be governed with evidence instead of anecdote.
+
+### Story 1.8: Add Phase 1 Evaluation and Launch Guardrails
+
+As a product owner or operator,
+I want a repeatable evaluation suite for Phase 1,
+So that launch readiness is judged against grounded-answer and permission-safety expectations.
+
+**FRs implemented:** FR14, FR15, FR17
+
+**Acceptance Criteria:**
 
 **Given** grounded answers are produced
 **When** quality metrics are computed
@@ -462,10 +502,10 @@ So that the entry-backed rollout can be monitored and trusted in production.
 **Then** the suite covers exact-match, semantic, no-answer, and ACL-sensitive entry scenarios
 **And** results are available to product and engineering stakeholders.
 
-**Given** regressions appear after rollout
-**When** operators inspect the assistant signals
-**Then** they can identify whether the issue is retrieval quality, permission enforcement, or downstream provider instability
-**And** the rollout can be governed with evidence instead of anecdote.
+**Given** unsupported narrative answers or blocked-source leakage are detected
+**When** evaluation results are reviewed
+**Then** the release is treated as not launch-ready
+**And** remediation work is created before broader rollout.
 
 ## Epic 2: Expand the Assistant to Private Files, PDFs, and Images
 
@@ -611,6 +651,11 @@ So that I can discover and inspect knowledge regardless of source format.
 **Then** entries show body excerpts, PDFs show page-based excerpts, documents show section excerpts, and images show OCR-backed text or thumbnail context
 **And** each preview remains permission-safe.
 
+**Given** an image-backed or OCR-backed preview is displayed
+**When** assistive technologies are used
+**Then** the preview exposes a text alternative or extracted-text equivalent
+**And** users do not need the thumbnail alone to understand the source.
+
 **Given** a user does not have access to a source
 **When** results and previews are rendered
 **Then** the source is omitted entirely rather than shown as a disabled teaser
@@ -753,7 +798,7 @@ So that I can explain and resolve trust issues with evidence.
 **Given** a user reports that the assistant cited the wrong source
 **When** the operator reviews the diagnostic record
 **Then** they can determine whether the issue most likely came from ranking, citation assembly, source freshness, or missing trace data
-**And** the system clearly indicates when deeper citation-to-source trace inspection requires Story 3.4 capabilities.
+**And** the system clearly labels when the available diagnostic record is insufficient for a source-level conclusion.
 
 **Given** an operator does not have permission to reveal certain content broadly
 **When** they use the diagnostics surface
