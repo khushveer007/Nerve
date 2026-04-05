@@ -40,7 +40,7 @@ const SIDEBAR: Record<string, RoleConfig> = {
       { path: '/admin/export', label: 'Export data', icon: Download },
     ]},
     { heading: 'AI', items: [
-      { path: '/ai/query',      label: 'Ask AI',     icon: MessageSquare },
+      { path: '/ai/query',      label: 'Assistant',  icon: MessageSquare },
       { path: '/ai/newsletter', label: 'Newsletter', icon: Newspaper },
     ]},
   ]),
@@ -67,7 +67,7 @@ const SIDEBAR: Record<string, RoleConfig> = {
       { path: '/admin/export', label: 'Export data',  icon: Download },
     ]},
     { heading: 'AI', items: [
-      { path: '/ai/query',      label: 'Ask AI',     icon: MessageSquare },
+      { path: '/ai/query',      label: 'Assistant',  icon: MessageSquare },
       { path: '/ai/newsletter', label: 'Newsletter', icon: Newspaper },
     ]},
   ]),
@@ -88,7 +88,7 @@ const SIDEBAR: Record<string, RoleConfig> = {
       { path: '/content/team',      label: 'My team',   icon: Users },
     ]},
     { heading: 'AI', items: [
-      { path: '/ai/query',      label: 'Ask AI',     icon: MessageSquare },
+      { path: '/ai/query',      label: 'Assistant',  icon: MessageSquare },
       { path: '/ai/newsletter', label: 'Newsletter', icon: Newspaper },
     ]},
   ]),
@@ -108,7 +108,7 @@ const SIDEBAR: Record<string, RoleConfig> = {
       { path: '/admin/export', label: 'Export data',  icon: Download },
     ]},
     { heading: 'AI', items: [
-      { path: '/ai/query',      label: 'Ask AI',     icon: MessageSquare },
+      { path: '/ai/query',      label: 'Assistant',  icon: MessageSquare },
       { path: '/ai/newsletter', label: 'Newsletter', icon: Newspaper },
     ]},
   ]),

@@ -1,5 +1,5 @@
 # generated: 2026-04-05T17:41:31+05:30
-# last_updated: 2026-04-05T17:41:31+05:30
+# last_updated: 2026-04-05T22:24:38+05:30
 # project: Nerve
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,15 +35,15 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05T17:41:31+05:30
-last_updated: 2026-04-05T17:41:31+05:30
+last_updated: 2026-04-05T22:24:38+05:30
 project: Nerve
 project_key: NOKEY
 tracking_system: file-system
 story_location: /home/opsa/Work/Nerve/_bmad-output/implementation-artifacts
 
 development_status:
-  epic-1: backlog
-  1-1-replace-the-legacy-aiquery-page-with-the-assistant-workspace: backlog
+  epic-1: in-progress
+  1-1-replace-the-legacy-aiquery-page-with-the-assistant-workspace: done
   1-2-index-existing-entries-as-the-phase-1-knowledge-corpus: backlog
   1-3-deliver-permission-safe-entry-search: backlog
   1-4-add-hybrid-search-and-intent-routing-for-entry-queries: backlog

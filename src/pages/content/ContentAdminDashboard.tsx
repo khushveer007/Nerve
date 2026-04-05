@@ -155,7 +155,7 @@ export default function ContentAdminDashboard() {
             { to: '/add',           icon: PlusCircle,    label: 'Add entry',    desc: 'Log a content update' },
             { to: '/browse',        icon: Search,        label: 'Browse all',   desc: 'Search all entries' },
             { to: '/content/team',  icon: Users,         label: 'Team members', desc: 'View your team' },
-            { to: '/ai/query',      icon: MessageSquare, label: 'Ask AI',       desc: 'Query knowledge base' },
+            { to: '/ai/query',      icon: MessageSquare, label: 'Assistant',    desc: 'Open assistant workspace' },
             { to: '/ai/newsletter', icon: Newspaper,     label: 'Newsletter',   desc: 'Generate newsletter' },
             { to: '/admin/export',  icon: Download,      label: 'Export',       desc: 'Download data' },
           ].map(({ to, icon: Icon, label, desc }) => (

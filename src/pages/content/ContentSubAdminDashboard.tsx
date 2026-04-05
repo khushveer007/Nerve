@@ -107,7 +107,7 @@ export default function ContentSubAdminDashboard() {
               { to: '/add',          icon: PlusCircle,   label: 'Add entry' },
               { to: '/browse',       icon: Search,       label: 'Browse entries' },
               { to: '/content/team', icon: Users,        label: 'My team' },
-              { to: '/ai/query',     icon: MessageSquare, label: 'Ask AI' },
+              { to: '/ai/query',     icon: MessageSquare, label: 'Assistant' },
             ].map(({ to, icon: Icon, label }) => (
               <Link key={to} to={to}
                 className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-accent transition-colors group">

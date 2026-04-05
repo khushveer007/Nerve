@@ -36,7 +36,7 @@ export default function ContentUserDashboard() {
   const tools = [
     { to: '/add',           icon: PlusCircle,    label: 'Add Entry',    desc: 'Log a content update',     accent: 'bg-blue-50 text-blue-700 hover:bg-blue-100' },
     { to: '/browse',        icon: Search,        label: 'Browse',       desc: 'Search all content',       accent: 'bg-muted text-foreground hover:bg-accent' },
-    { to: '/ai/query',      icon: MessageSquare, label: 'Ask AI',       desc: 'Query the knowledge base', accent: 'bg-violet-50 text-violet-700 hover:bg-violet-100' },
+    { to: '/ai/query',      icon: MessageSquare, label: 'Assistant',    desc: 'Open assistant workspace', accent: 'bg-violet-50 text-violet-700 hover:bg-violet-100' },
     { to: '/ai/newsletter', icon: Newspaper,     label: 'Newsletter',   desc: 'Generate AI newsletter',   accent: 'bg-teal-50 text-teal-700 hover:bg-teal-100' },
     { to: '/admin/export',  icon: Download,      label: 'Export',       desc: 'Download content data',    accent: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
   ]
