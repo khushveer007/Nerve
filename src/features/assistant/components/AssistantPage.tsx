@@ -56,13 +56,21 @@ const EMPTY_FILTERS = {
   tags: [],
 } as const
 
-function buildAssistantSummary(result: AssistantQueryResult) {
+function buildAssistantSummary(result: AssistantQueryResult, requestedMode: AssistantMode) {
   if (result.results.length === 0) {
-    return 'No indexed entry-backed results matched this request yet.'
+    if (requestedMode === 'auto' && result.mode === 'ask') {
+      return 'Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled and no accessible entry-backed matches were found yet.'
+    }
+
+    return 'No accessible entry-backed matches were found for this request yet.'
+  }
+
+  if (requestedMode === 'auto' && result.mode === 'ask') {
+    return `Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled, so I found ${result.results.length} evidence-backed entry result${result.results.length === 1 ? '' : 's'} instead.`
   }
 
   if (result.mode === 'ask') {
-    return `Grounded answer synthesis is still reserved for a later story, but I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} for this request.`
+    return `Grounded answer synthesis is still not enabled, but I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} for this request.`
   }
 
   return `I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} from the indexed Phase 1 corpus.`
@@ -149,8 +157,8 @@ export default function AssistantPage() {
     if (lastAssistantMessage?.result && lastAssistantMessage.result.results.length === 0) {
       return {
         kind: 'no_answer',
-        title: 'No indexed entry-backed matches were found.',
-        description: 'Try a known title phrase, department name, or tag from an existing Nerve entry.',
+        title: 'No accessible entry-backed matches were found.',
+        description: 'Retry the same query or refine it with a title phrase, department name, or tag.',
       }
     }
 
@@ -258,8 +266,15 @@ export default function AssistantPage() {
     }
   }
 
-  async function handleSubmit(nextPrompt?: string) {
+  function handleEditOriginalQuery(queryText: string, queryMode: AssistantMode) {
+    setMode(queryMode)
+    setDraft(queryText)
+    focusComposer()
+  }
+
+  async function handleSubmit(nextPrompt?: string, requestedMode?: AssistantMode) {
     const content = (nextPrompt ?? draft).trim()
+    const effectiveMode = requestedMode ?? mode
 
     if (!content || isChecking || isSubmitting) {
       return
@@ -271,7 +286,7 @@ export default function AssistantPage() {
       id: createMessageId(),
       role: 'user',
       content,
-      mode,
+      mode: effectiveMode,
       createdAt,
     }
 
@@ -289,7 +304,7 @@ export default function AssistantPage() {
           id: createMessageId(),
           role: 'assistant',
           content: '',
-          mode,
+          mode: effectiveMode,
           createdAt: new Date().toISOString(),
           error: {
             title: availability.title,
@@ -303,7 +318,7 @@ export default function AssistantPage() {
     try {
       const result = await queryMutation.mutateAsync({
         query: {
-          mode,
+          mode: effectiveMode,
           text: content,
           filters: EMPTY_FILTERS,
         },
@@ -318,8 +333,8 @@ export default function AssistantPage() {
         {
           id: createMessageId(),
           role: 'assistant',
-          content: buildAssistantSummary(result),
-          mode,
+          content: buildAssistantSummary(result, effectiveMode),
+          mode: effectiveMode,
           createdAt: new Date().toISOString(),
           result,
         },
@@ -339,7 +354,7 @@ export default function AssistantPage() {
           id: createMessageId(),
           role: 'assistant',
           content: '',
-          mode,
+          mode: effectiveMode,
           createdAt: new Date().toISOString(),
           error: {
             title: 'Assistant request failed.',
@@ -388,11 +403,15 @@ export default function AssistantPage() {
           {hasTranscript ? (
             <AssistantTranscript
               messages={messages}
+              onEditQuery={handleEditOriginalQuery}
               onOpenSource={(result) => {
                 void handleOpenSource(result)
               }}
               onPreviewSource={(result) => {
                 void handlePreviewSource(result)
+              }}
+              onRetryQuery={(queryText, queryMode) => {
+                void handleSubmit(queryText, queryMode)
               }}
               openSourcePendingId={openMutation.isPending ? (openMutation.variables?.open.source.chunk_id ?? null) : null}
               previewSourcePendingId={previewMutation.isPending ? (previewMutation.variables?.preview.source.chunk_id ?? null) : null}

@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { buildAssistantSourceOpenPath } from "./acl.js";
+import { embeddingsEnabled, embedQueryText } from "./embeddings.js";
 import {
   getAssistantHealthSnapshot,
   getAuthorizedAssistantEntrySource,
   searchEntryKnowledge,
 } from "./db.js";
+import { resolveAssistantMode } from "./intent.js";
 import type {
   AssistantActorContext,
   AssistantHealthResponse,
@@ -58,7 +60,7 @@ function buildFollowUpSuggestions(resultCount: number, mode: AssistantQueryResul
 
   if (mode === "ask") {
     return [
-      "Grounded answer synthesis is reserved for a later story, so this turn returns entry matches only.",
+      "Grounded answer synthesis is still not enabled, so this turn returns evidence-backed entry matches only.",
       "Refine the query with a department, title phrase, or date to narrow the corpus.",
     ];
   }
@@ -73,10 +75,21 @@ export async function executeAssistantQuery(
   actor: AssistantActorContext,
   input: AssistantQueryInput,
 ): Promise<AssistantQueryResult> {
-  const resolvedMode: AssistantQueryResult["mode"] = input.mode === "ask" ? "ask" : "search";
+  const resolvedMode = resolveAssistantMode(input).mode;
+  let queryEmbedding: string | null = null;
+
+  if (embeddingsEnabled()) {
+    try {
+      queryEmbedding = await embedQueryText(input.text);
+    } catch {
+      queryEmbedding = null;
+    }
+  }
+
   const results = await searchEntryKnowledge({
     actor,
     queryText: input.text,
+    queryEmbedding,
     filters: input.filters,
     limit: config.assistant.queryResultLimit,
   });

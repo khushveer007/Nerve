@@ -99,6 +99,30 @@ function buildAssistantQueryResponse() {
   }
 }
 
+function buildAutoAskQueryResponse() {
+  const payload = buildAssistantQueryResponse()
+  payload.result.mode = 'ask'
+  return payload
+}
+
+function buildNoResultsQueryResponse() {
+  return {
+    result: {
+      mode: 'search',
+      answer: null,
+      enough_evidence: false,
+      grounded: false,
+      citations: [],
+      follow_up_suggestions: [
+        'Try an exact entry title, department name, or tag from the existing corpus.',
+        'Keep queries entry-focused in Phase 1 because uploads and mixed media arrive in later stories.',
+      ],
+      request_id: 'req_test_empty',
+      results: [],
+    },
+  }
+}
+
 function buildAssistantPreviewResponse() {
   return {
     preview: {
@@ -741,6 +765,111 @@ describe('AIQueryPage', () => {
     expect(screen.getByText(/entry corpus has not been indexed yet/i)).toBeInTheDocument()
     expect(screen.getByText(/start the worker or wait for queued jobs to finish/i)).toBeInTheDocument()
     expect(screen.queryByText(/assistant search and answer services are unavailable/i)).not.toBeInTheDocument()
+  })
+
+  it('makes routed auto-to-ask turns explicit when answer synthesis is not available yet', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => buildAutoAskQueryResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Summarize the Adobe partnership' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText(/auto mode routed this turn through ask/i)).toBeInTheDocument()
+    expect(screen.getByText(/grounded answer synthesis is still not enabled/i)).toBeInTheDocument()
+  })
+
+  it('shows neutral no-results guidance with one-click retry and edit actions', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => buildNoResultsQueryResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'starlight orchard memo' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect((await screen.findAllByText(/no accessible entry-backed matches/i)).length).toBeGreaterThan(0)
+    expect(screen.getByText(/exact entry title, department name, or tag/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit original query' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit original query' }))
+    expect(screen.getByLabelText('Message assistant')).toHaveValue('starlight orchard memo')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
   })
 })
 

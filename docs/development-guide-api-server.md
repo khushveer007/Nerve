@@ -30,7 +30,7 @@ Useful defaults or optional values:
 - `SUPER_ADMIN_EMAIL` defaults to `super@parul.ac.in`
 - `ASSISTANT_RAG_ENABLED` defaults to `true`
 - `ASSISTANT_QUERY_RESULT_LIMIT` defaults to `5`
-- `ASSISTANT_EMBEDDING_URL` is optional; if omitted, the Phase 1 query path stays search-first and stores null embeddings
+- `ASSISTANT_EMBEDDING_URL` is optional; if omitted, ingestion stores null embeddings and query-time retrieval degrades to metadata + FTS + trigram ranking
 - `ASSISTANT_WORKER_POLL_MS`, `ASSISTANT_JOB_MAX_ATTEMPTS`, `ASSISTANT_JOB_RETRY_BASE_MS`, and `ASSISTANT_JOB_STALE_LOCK_MS` control the PostgreSQL job worker
 
 ## Local Setup
@@ -118,6 +118,7 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 3. Update the worker path in `server/workers/rag-worker.ts` when queue semantics change
 4. Extend `server/test/rag/*` and the assistant client tests together so backend and shell behavior stay aligned
 5. Preserve the session-driven actor handoff from route -> zod schema -> service -> ACL/db helpers so assistant retrieval never falls back to anonymous access
+6. Keep `auto` intent routing deterministic inside `server/rag/*`; Phase 1 should prefer explainable search behavior over speculative answer text
 
 ### Change auth or role behavior
 
@@ -139,7 +140,8 @@ These scripts assume a VPS filesystem layout under `/srv/nerve`.
 ## Known Constraints
 
 - `server/db.ts` still owns the business-table bootstrap path, so keep new retrieval work in `server/rag/*` rather than growing it further.
-- Assistant embeddings are optional in Story 1.2; if no embedding endpoint is configured, search still works through metadata, trigram, and FTS.
+- Assistant embeddings are optional in Phase 1; if no embedding endpoint is configured, search still works through metadata-aware exact matching, trigram, and FTS.
+- Routed `ask` turns in Story 1.4 still return `answer: null`; grounded synthesis is intentionally deferred to the next story.
 - The retained Supabase schema diverges from the active API role model.
 
 ## Recommended Checks Before Merging Backend Work

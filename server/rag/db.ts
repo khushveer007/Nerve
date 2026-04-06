@@ -701,10 +701,12 @@ export async function listEntryIdsForBackfill() {
 export async function searchEntryKnowledge(options: {
   actor: AssistantActorContext;
   queryText: string;
+  queryEmbedding?: string | null;
   filters: AssistantQueryFilters;
   limit: number;
 }) {
-  const accessClause = buildKnowledgeAssetAccessClause(options.actor, { startIndex: 6 });
+  const accessClause = buildKnowledgeAssetAccessClause(options.actor, { startIndex: 7 });
+  const candidateLimit = Math.max(options.limit * 8, 24);
   const result = await pool.query<{
     asset_id: string;
     asset_version_id: string;
@@ -716,11 +718,12 @@ export async function searchEntryKnowledge(options: {
     metadata: EntryKnowledgeMetadata;
     citation_locator: CitationLocator;
   }>(
-    `WITH candidates AS (
+    `WITH accessible_chunks AS (
       SELECT
         ka.id AS asset_id,
         kav.id AS asset_version_id,
         kc.id AS chunk_id,
+        kc.chunk_no,
         ka.source_id AS entry_id,
         ka.title,
         COALESCE(
@@ -743,13 +746,23 @@ export async function searchEntryKnowledge(options: {
           ),
           LEFT(kc.content, 280)
         ) AS snippet,
-        (
-          COALESCE(ts_rank_cd(kc.search_vector, plainto_tsquery('english', $1)), 0) * 1.8
-          + GREATEST(similarity(ka.title, $1), 0)
-          + CASE WHEN ka.title ILIKE '%' || $1 || '%' THEN 1.2 ELSE 0 END
-          + CASE WHEN kc.content ILIKE '%' || $1 || '%' THEN 0.45 ELSE 0 END
-        ) AS score,
-        kc.metadata,
+        CASE
+          WHEN lower(ka.title) = lower($1) THEN 4
+          WHEN lower(ka.title) LIKE lower($1) || '%' THEN 3
+          WHEN ka.title ILIKE '%' || $1 || '%' THEN 2
+          WHEN lower(ka.metadata ->> 'dept') = lower($1) THEN 2
+          WHEN lower(ka.metadata ->> 'type') = lower($1) THEN 2
+          WHEN EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements_text(ka.metadata -> 'tags') AS tag(value)
+             WHERE lower(tag.value) = lower($1)
+          ) THEN 2
+          ELSE 0
+        END AS exact_strength,
+        kc.search_vector,
+        kc.embedding,
+        kc.content,
+        ka.metadata,
         kc.citation_locator
       FROM knowledge_chunks kc
       INNER JOIN knowledge_assets ka
@@ -759,43 +772,192 @@ export async function searchEntryKnowledge(options: {
       WHERE ka.source_kind = 'entry'
         AND ${accessClause.sql}
         AND ka.status = 'ready'
+        AND kav.extraction_status = 'ready'
         AND kav.superseded_at IS NULL
         AND (
-          cardinality($2::text[]) = 0 OR (ka.metadata ->> 'dept') = ANY($2::text[])
+          cardinality($3::text[]) = 0 OR (ka.metadata ->> 'dept') = ANY($3::text[])
         )
         AND (
-          cardinality($3::text[]) = 0 OR (ka.metadata ->> 'type') = ANY($3::text[])
+          cardinality($4::text[]) = 0 OR (ka.metadata ->> 'type') = ANY($4::text[])
         )
         AND (
-          cardinality($4::text[]) = 0 OR (ka.metadata ->> 'priority') = ANY($4::text[])
+          cardinality($5::text[]) = 0 OR (ka.metadata ->> 'priority') = ANY($5::text[])
         )
         AND (
-          cardinality($5::text[]) = 0 OR EXISTS (
+          cardinality($6::text[]) = 0 OR EXISTS (
             SELECT 1
               FROM jsonb_array_elements_text(ka.metadata -> 'tags') AS tag(value)
-             WHERE tag.value = ANY($5::text[])
+             WHERE tag.value = ANY($6::text[])
           )
         )
-        AND (
-          kc.search_vector @@ plainto_tsquery('english', $1)
-          OR ka.title ILIKE '%' || $1 || '%'
-          OR kc.content ILIKE '%' || $1 || '%'
-          OR similarity(ka.title, $1) > 0.15
-        )
     ),
-    top_per_asset AS (
-      SELECT DISTINCT ON (asset_id)
+    metadata_candidates AS (
+      SELECT
         asset_id,
         asset_version_id,
         chunk_id,
         entry_id,
         title,
         snippet,
-        score,
+        metadata,
+        citation_locator,
+        ROW_NUMBER() OVER (
+          ORDER BY exact_strength DESC, similarity(title, $1) DESC, chunk_no ASC, asset_id ASC
+        ) AS candidate_rank
+      FROM accessible_chunks
+      WHERE exact_strength > 0
+    ),
+    fts_candidates AS (
+      SELECT
+        asset_id,
+        asset_version_id,
+        chunk_id,
+        entry_id,
+        title,
+        snippet,
+        metadata,
+        citation_locator,
+        ROW_NUMBER() OVER (
+          ORDER BY ts_rank_cd(search_vector, plainto_tsquery('english', $1)) DESC, chunk_no ASC, asset_id ASC
+        ) AS candidate_rank
+      FROM accessible_chunks
+      WHERE search_vector @@ plainto_tsquery('english', $1)
+    ),
+    trigram_candidates AS (
+      SELECT
+        asset_id,
+        asset_version_id,
+        chunk_id,
+        entry_id,
+        title,
+        snippet,
+        metadata,
+        citation_locator,
+        ROW_NUMBER() OVER (
+          ORDER BY GREATEST(similarity(title, $1), similarity(content, $1)) DESC, chunk_no ASC, asset_id ASC
+        ) AS candidate_rank
+      FROM accessible_chunks
+      WHERE similarity(title, $1) > 0.15
+         OR similarity(content, $1) > 0.08
+    ),
+    vector_candidates AS (
+      SELECT
+        asset_id,
+        asset_version_id,
+        chunk_id,
+        entry_id,
+        title,
+        snippet,
+        metadata,
+        citation_locator,
+        ROW_NUMBER() OVER (
+          ORDER BY embedding <=> $2::vector ASC, chunk_no ASC, asset_id ASC
+        ) AS candidate_rank
+      FROM accessible_chunks
+      WHERE $2::vector IS NOT NULL
+        AND embedding IS NOT NULL
+    ),
+    fused_candidates AS (
+      SELECT
+        asset_id,
+        asset_version_id,
+        chunk_id,
+        entry_id,
+        title,
+        snippet,
+        metadata,
+        citation_locator,
+        MAX(exact_signal) AS exact_signal,
+        SUM(rrf_score) AS score
+      FROM (
+        SELECT
+          asset_id,
+          asset_version_id,
+          chunk_id,
+          entry_id,
+          title,
+          snippet,
+          metadata,
+          citation_locator,
+          1 AS exact_signal,
+          1.0 / (50 + candidate_rank) AS rrf_score
+        FROM metadata_candidates
+        WHERE candidate_rank <= $11
+
+        UNION ALL
+
+        SELECT
+          asset_id,
+          asset_version_id,
+          chunk_id,
+          entry_id,
+          title,
+          snippet,
+          metadata,
+          citation_locator,
+          0 AS exact_signal,
+          1.0 / (50 + candidate_rank) AS rrf_score
+        FROM fts_candidates
+        WHERE candidate_rank <= $11
+
+        UNION ALL
+
+        SELECT
+          asset_id,
+          asset_version_id,
+          chunk_id,
+          entry_id,
+          title,
+          snippet,
+          metadata,
+          citation_locator,
+          0 AS exact_signal,
+          1.0 / (50 + candidate_rank) AS rrf_score
+        FROM trigram_candidates
+        WHERE candidate_rank <= $11
+
+        UNION ALL
+
+        SELECT
+          asset_id,
+          asset_version_id,
+          chunk_id,
+          entry_id,
+          title,
+          snippet,
+          metadata,
+          citation_locator,
+          0 AS exact_signal,
+          1.0 / (50 + candidate_rank) AS rrf_score
+        FROM vector_candidates
+        WHERE candidate_rank <= $11
+      ) fused
+      GROUP BY
+        asset_id,
+        asset_version_id,
+        chunk_id,
+        entry_id,
+        title,
+        snippet,
         metadata,
         citation_locator
-      FROM candidates
-      ORDER BY asset_id, score DESC, chunk_id
+    ),
+    top_per_asset AS (
+      SELECT
+        asset_id,
+        asset_version_id,
+        chunk_id,
+        entry_id,
+        title,
+        snippet,
+        score + (exact_signal * 0.02) AS score,
+        metadata,
+        citation_locator,
+        ROW_NUMBER() OVER (
+          PARTITION BY asset_id
+          ORDER BY exact_signal DESC, score DESC, chunk_id ASC
+        ) AS asset_rank
+      FROM fused_candidates
     )
     SELECT
       asset_id,
@@ -808,15 +970,18 @@ export async function searchEntryKnowledge(options: {
       metadata,
       citation_locator
     FROM top_per_asset
+    WHERE asset_rank = 1
     ORDER BY score DESC, title ASC
-    LIMIT $10`,
+    LIMIT $12`,
     [
       options.queryText,
+      options.queryEmbedding ?? null,
       options.filters.departments,
       options.filters.entry_types,
       options.filters.priorities,
       options.filters.tags,
       ...accessClause.params,
+      candidateLimit,
       options.limit,
     ],
   );

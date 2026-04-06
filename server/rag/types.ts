@@ -3,6 +3,7 @@ export type KnowledgeJobStatus = "queued" | "running" | "succeeded" | "failed" |
 export type KnowledgeJobType = "extract" | "normalize" | "chunk" | "embed" | "reindex" | "delete";
 export type KnowledgeVisibilityScope = "authenticated" | "team" | "owner" | "explicit_acl";
 export type AssistantQueryMode = "auto" | "search" | "ask";
+export type AssistantResolvedMode = "search" | "ask";
 export type AssistantActorRole = "super_admin" | "admin" | "sub_admin" | "user";
 
 export interface AssistantActorContext {
@@ -23,6 +24,11 @@ export interface AssistantQueryInput {
   mode: AssistantQueryMode;
   text: string;
   filters: AssistantQueryFilters;
+}
+
+export interface AssistantIntentResolution {
+  mode: AssistantResolvedMode;
+  reason: string;
 }
 
 export interface AssistantSourceReference {
@@ -102,7 +108,7 @@ export interface AssistantCitation {
 }
 
 export interface AssistantQueryResult {
-  mode: "search" | "ask";
+  mode: AssistantResolvedMode;
   answer: null;
   enough_evidence: boolean;
   grounded: boolean;

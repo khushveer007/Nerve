@@ -9,8 +9,15 @@ import {
 } from "./test-utils.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+const EMPTY_FILTERS = {
+  departments: [],
+  entry_types: [],
+  priorities: [],
+  tags: [],
+};
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (cleanups.length > 0) {
     const cleanup = cleanups.pop();
     if (cleanup) {
@@ -25,6 +32,23 @@ const SUPER_ADMIN_ACTOR = {
   role: "super_admin" as const,
   team_id: null,
 };
+
+function buildEmbedding(index: number) {
+  return Array.from({ length: 1536 }, (_, current) => (current === index ? 1 : 0));
+}
+
+async function setAssetEmbedding(
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  assetId: string,
+  embedding: number[],
+) {
+  await runtime.modules.db.pool.query(
+    `UPDATE knowledge_chunks
+        SET embedding = $2::vector
+      WHERE asset_id = $1`,
+    [assetId, JSON.stringify(embedding)],
+  );
+}
 
 async function createIndexedEntry(
   runtime: Awaited<ReturnType<typeof createTestRuntime>>,
@@ -852,6 +876,230 @@ describe("Story 1.2 RAG backend", () => {
     } finally {
       await stopHttpServer(server);
     }
+  });
+
+  it("routes clear synthesis-style auto queries to ask mode without fabricating answer text", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "auto",
+      text: "Summarize what Nerve says about NABH accreditation.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("ask");
+    expect(result.answer).toBeNull();
+    expect(result.grounded).toBe(false);
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.follow_up_suggestions[0]).toMatch(/grounded answer synthesis/i);
+  });
+
+  it("keeps ambiguous auto queries explainable by resolving them to search mode", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "auto",
+      text: "NABH accreditation",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("search");
+    expect(result.answer).toBeNull();
+    expect(result.grounded).toBe(false);
+    expect(result.results.length).toBeGreaterThan(0);
+  });
+
+  it("uses query-time embeddings to return semantic matches when lexical retrieval alone would miss them", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const semanticEntry = await createIndexedEntry(runtime, {
+      title: "Project Aurora",
+      dept: "Design",
+      type: "Notice",
+      body: "Lumen graph ember slate.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["aurora"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    const distractorEntry = await createIndexedEntry(runtime, {
+      title: "Project Orchard",
+      dept: "Medical",
+      type: "Notice",
+      body: "Pebble harbor mint lantern.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "ca-001",
+      tags: ["orchard"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await setAssetEmbedding(runtime, semanticEntry.asset.id, buildEmbedding(0));
+    await setAssetEmbedding(runtime, distractorEntry.asset.id, buildEmbedding(1));
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ embedding: buildEmbedding(0) }],
+      }),
+    } as Response);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "search",
+      text: "semantic-aurora-intent",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.results[0]?.title).toBe("Project Aurora");
+    expect(result.results.some((item) => item.title === "Project Orchard")).toBe(true);
+  });
+
+  it("falls back to lexical hybrid retrieval when query-time embeddings are unavailable", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "search",
+      text: "Adobe Creative Suite",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.results[0]?.title).toContain("Adobe");
+  });
+
+  it("keeps ACL enforcement inside hybrid candidate generation when semantic retrieval is enabled", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const accessibleEntry = await createIndexedEntry(runtime, {
+      title: "Aurora Access",
+      dept: "Design",
+      type: "Notice",
+      body: "Lumen graph ember slate.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["aurora-access"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    const restrictedEntry = await createIndexedEntry(runtime, {
+      title: "Prism Access",
+      dept: "Design",
+      type: "Notice",
+      body: "Pebble harbor mint lantern.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["prism-access"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET visibility_scope = 'team',
+              owner_team_id = 'branding',
+              updated_at = NOW()
+        WHERE id = $1`,
+      [restrictedEntry.asset.id],
+    );
+
+    await setAssetEmbedding(runtime, accessibleEntry.asset.id, buildEmbedding(0));
+    await setAssetEmbedding(runtime, restrictedEntry.asset.id, buildEmbedding(0));
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ embedding: buildEmbedding(0) }],
+      }),
+    } as Response);
+
+    const contentActor = {
+      authenticated: true as const,
+      user_id: "cu-001",
+      role: "user" as const,
+      team_id: "content",
+    };
+
+    const result = await runtime.modules.service.executeAssistantQuery(contentActor, {
+      mode: "search",
+      text: "semantic-acl-intent",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.results.map((item) => item.title)).toContain("Aurora Access");
+    expect(result.results.map((item) => item.title)).not.toContain("Prism Access");
+  });
+
+  it("returns neutral no-results guidance with refinement suggestions", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "auto",
+      text: "Summarize the starlight orchard policy memo.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("ask");
+    expect(result.results).toHaveLength(0);
+    expect(result.follow_up_suggestions).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/exact entry title/i),
+        expect.stringMatching(/phase 1/i),
+      ]),
+    );
   });
 
   it("keeps the assistant disabled path out of startup indexing and query execution", async () => {

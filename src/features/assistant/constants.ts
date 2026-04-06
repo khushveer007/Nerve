@@ -73,7 +73,7 @@ export function getAssistantAnnouncement(state: AssistantVisibleState): string {
     case 'info':
       return state.title
     case 'no_answer':
-      return 'No grounded answer was found for the current request.'
+      return 'No accessible entry-backed matches were found for the current request.'
     case 'error':
       return 'Assistant status changed. An error interrupted the current request.'
     case 'unavailable':

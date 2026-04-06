@@ -46,7 +46,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 | `POST` | `/api/auth/logout` | Public | Destroy session |
 | `GET` | `/api/bootstrap` | Session | Fetch entries, users, teams, and optionally branding rows |
 | `GET` | `/api/assistant/health` | Session | Report backend and corpus readiness for the assistant shell |
-| `POST` | `/api/assistant/query` | Session | Search the Phase 1 entry-backed corpus |
+| `POST` | `/api/assistant/query` | Session | Route and retrieve against the Phase 1 entry-backed corpus |
 | `POST` | `/api/assistant/source-preview` | Session | Load a permission-safe assistant source preview |
 | `POST` | `/api/assistant/source-open` | Session | Resolve an authorized assistant source open target |
 | `GET` | `/api/entries` | Session | List entries |
@@ -136,7 +136,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 ### `POST /api/assistant/query`
 
-- **Purpose:** Execute the first production assistant query path over entry-backed `knowledge_*` records.
+- **Purpose:** Execute the routed Phase 1 assistant query path over entry-backed `knowledge_*` records.
 - **Auth:** Any authenticated user.
 - **Authorization Notes:** Retrieval is request-scoped and ACL-aware. The assistant evaluates the current session user, role, team, asset ownership, `visibility_scope`, and `knowledge_acl_principals` before it shapes snippets, citations, counts, or actions.
 - **Request Body:**
@@ -144,7 +144,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 ```json
 {
   "query": {
-    "mode": "search",
+    "mode": "auto",
     "text": "NABH accreditation",
     "filters": {
       "departments": [],
@@ -201,8 +201,11 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 ```
 
 - **Notes:**
-  - Story 1.2 is intentionally search-first, so `answer` remains `null` and `grounded` remains `false`.
+  - `result.mode` is the resolved server mode. Explicit `search` and `ask` selections stay authoritative, while `auto` is routed deterministically to `search` or `ask`.
+  - Story 1.4 still keeps `answer` as `null` and `grounded` as `false`; routed `ask` turns stay evidence-led until grounded synthesis lands in a later story.
   - Results are limited to `source_kind = "entry"` in this Phase 1 slice.
+  - Retrieval uses an ACL-safe hybrid pipeline across metadata-aware exact matching, PostgreSQL full-text search, trigram similarity, and vector similarity when query embeddings are configured.
+  - If `ASSISTANT_EMBEDDING_URL` is not configured, the route degrades safely to metadata + FTS + trigram retrieval without changing the response shape.
   - Unauthorized assets are excluded before snippets, citations, and follow-up guidance are assembled.
   - Blocked sources do not appear as disabled cards, teaser actions, hidden counts, or partial metadata.
 

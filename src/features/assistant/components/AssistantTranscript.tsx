@@ -4,12 +4,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-import type { AssistantEntryResult, AssistantMessage } from '../types'
+import type { AssistantEntryResult, AssistantMessage, AssistantMode } from '../types'
 
 interface AssistantTranscriptProps {
+  onEditQuery: (queryText: string, queryMode: AssistantMode) => void
   messages: AssistantMessage[]
   onOpenSource: (result: AssistantEntryResult) => void
   onPreviewSource: (result: AssistantEntryResult) => void
+  onRetryQuery: (queryText: string, queryMode: AssistantMode) => void
   openSourcePendingId?: string | null
   previewSourcePendingId?: string | null
 }
@@ -26,9 +28,11 @@ function formatCountLabel(count: number) {
 }
 
 export default function AssistantTranscript({
+  onEditQuery,
   messages,
   onOpenSource,
   onPreviewSource,
+  onRetryQuery,
   openSourcePendingId = null,
   previewSourcePendingId = null,
 }: AssistantTranscriptProps) {
@@ -42,7 +46,7 @@ export default function AssistantTranscript({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {messages.map((message) => (
+        {messages.map((message, index) => (
           <div
             className="rounded-2xl border border-border/70 bg-muted/30 p-4"
             key={message.id}
@@ -76,6 +80,9 @@ export default function AssistantTranscript({
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">{formatCountLabel(message.result.results.length)}</Badge>
+                    {message.mode === 'auto' && message.result.mode === 'ask' && (
+                      <Badge variant="outline">Routed to Ask</Badge>
+                    )}
                     <Badge variant="outline">
                       {message.result.grounded ? 'Grounded' : 'Search-first'}
                     </Badge>
@@ -89,9 +96,40 @@ export default function AssistantTranscript({
                   <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
                     <div className="mb-2 flex items-center gap-2 text-foreground">
                       <SearchX className="h-4 w-4" />
-                      <span className="font-medium">No entry-backed matches yet</span>
+                      <span className="font-medium">No accessible entry-backed matches</span>
                     </div>
-                    Try a department name, title phrase, or a known tag from an existing entry.
+                    <p className="leading-6">
+                      Retry this query or refine it with a title phrase, department name, or known tag from an existing entry.
+                    </p>
+                    {message.result.follow_up_suggestions.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {message.result.follow_up_suggestions.map((suggestion) => (
+                          <p className="leading-6" key={`${message.id}-${suggestion}`}>
+                            {suggestion}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {messages[index - 1]?.role === 'user' && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => onRetryQuery(messages[index - 1]!.content, messages[index - 1]!.mode)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Try again
+                        </Button>
+                        <Button
+                          onClick={() => onEditQuery(messages[index - 1]!.content, messages[index - 1]!.mode)}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Edit original query
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
