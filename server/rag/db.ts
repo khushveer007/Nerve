@@ -4,10 +4,13 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { PoolClient } from "pg";
 import { pool, type Entry } from "../db.js";
+import { buildKnowledgeAssetAccessClause } from "./acl.js";
 import type {
+  AssistantActorContext,
   AssistantEntrySearchResult,
   AssistantHealthSnapshot,
   AssistantQueryFilters,
+  AssistantSourceReference,
   CitationLocator,
   EntryChunkDocument,
   EntryKnowledgeMetadata,
@@ -76,6 +79,10 @@ function mapSearchResult(row: {
     score: Number(row.score),
     metadata: row.metadata,
     citation_locator: row.citation_locator,
+    actions: {
+      preview: { available: true },
+      open_source: { available: true },
+    },
   };
 }
 
@@ -200,6 +207,16 @@ export async function getAssistantHealthSnapshot(): Promise<AssistantHealthSnaps
 
 export async function upsertEntryKnowledgeAsset(entry: Entry) {
   const metadata = buildEntryAssetMetadata(entry);
+  const ownerTeamResult = entry.created_by
+    ? await pool.query<{ team: string | null }>(
+      `SELECT team
+         FROM users
+        WHERE id = $1
+        LIMIT 1`,
+      [entry.created_by],
+    )
+    : null;
+  const ownerTeamId = ownerTeamResult?.rows[0]?.team ?? null;
   const result = await pool.query<{
     id: string;
     source_kind: string;
@@ -222,6 +239,7 @@ export async function upsertEntryKnowledgeAsset(entry: Entry) {
       sha256,
       size_bytes,
       owner_user_id,
+      owner_team_id,
       visibility_scope,
       status,
       created_by,
@@ -238,10 +256,11 @@ export async function upsertEntryKnowledgeAsset(entry: Entry) {
       '',
       $4,
       $5,
+      $6,
       'authenticated',
       'pending',
       $5,
-      $6::jsonb
+      $7::jsonb
     )
     ON CONFLICT (source_table, source_id)
     DO UPDATE SET
@@ -251,7 +270,8 @@ export async function upsertEntryKnowledgeAsset(entry: Entry) {
       sha256 = knowledge_assets.sha256,
       size_bytes = EXCLUDED.size_bytes,
       owner_user_id = EXCLUDED.owner_user_id,
-      visibility_scope = EXCLUDED.visibility_scope,
+      owner_team_id = EXCLUDED.owner_team_id,
+      visibility_scope = knowledge_assets.visibility_scope,
       status = knowledge_assets.status,
       created_by = EXCLUDED.created_by,
       metadata = EXCLUDED.metadata,
@@ -263,6 +283,7 @@ export async function upsertEntryKnowledgeAsset(entry: Entry) {
       entry.title,
       Buffer.byteLength(entry.body, "utf8"),
       entry.created_by,
+      ownerTeamId,
       JSON.stringify(metadata),
     ],
   );
@@ -678,10 +699,12 @@ export async function listEntryIdsForBackfill() {
 }
 
 export async function searchEntryKnowledge(options: {
+  actor: AssistantActorContext;
   queryText: string;
   filters: AssistantQueryFilters;
   limit: number;
 }) {
+  const accessClause = buildKnowledgeAssetAccessClause(options.actor, { startIndex: 6 });
   const result = await pool.query<{
     asset_id: string;
     asset_version_id: string;
@@ -734,7 +757,7 @@ export async function searchEntryKnowledge(options: {
       INNER JOIN knowledge_asset_versions kav
         ON kav.id = kc.asset_version_id
       WHERE ka.source_kind = 'entry'
-        AND ka.visibility_scope = 'authenticated'
+        AND ${accessClause.sql}
         AND ka.status = 'ready'
         AND kav.superseded_at IS NULL
         AND (
@@ -786,16 +809,61 @@ export async function searchEntryKnowledge(options: {
       citation_locator
     FROM top_per_asset
     ORDER BY score DESC, title ASC
-    LIMIT $6`,
+    LIMIT $10`,
     [
       options.queryText,
       options.filters.departments,
       options.filters.entry_types,
       options.filters.priorities,
       options.filters.tags,
+      ...accessClause.params,
       options.limit,
     ],
   );
 
   return result.rows.map(mapSearchResult);
+}
+
+export async function getAuthorizedAssistantEntrySource(options: {
+  actor: AssistantActorContext;
+  source: AssistantSourceReference;
+}) {
+  const accessClause = buildKnowledgeAssetAccessClause(options.actor);
+  const result = await pool.query<{
+    title: string;
+    excerpt: string;
+    metadata: EntryKnowledgeMetadata;
+  }>(
+    `SELECT
+      ka.title,
+      COALESCE(
+        NULLIF(LEFT(kc.content, 560), ''),
+        LEFT(kav.normalized_text, 560)
+      ) AS excerpt,
+      ka.metadata
+     FROM knowledge_assets ka
+     INNER JOIN knowledge_asset_versions kav
+       ON kav.asset_id = ka.id
+     INNER JOIN knowledge_chunks kc
+       ON kc.id = $7
+      AND kc.asset_id = ka.id
+      AND kc.asset_version_id = $6
+     WHERE ka.id = $5
+       AND ka.source_id = $8
+       AND ka.source_kind = 'entry'
+       AND ${accessClause.sql}
+       AND ka.status = 'ready'
+       AND kav.id = $6
+       AND kav.superseded_at IS NULL
+     LIMIT 1`,
+    [
+      ...accessClause.params,
+      options.source.asset_id,
+      options.source.asset_version_id,
+      options.source.chunk_id,
+      options.source.entry_id,
+    ],
+  );
+
+  return result.rows[0] ?? null;
 }

@@ -1,7 +1,18 @@
 import express from "express";
 import { config } from "../config.js";
-import { assistantQueryEnvelopeSchema } from "./schemas.js";
-import { executeAssistantQuery, getAssistantHealth } from "./service.js";
+import { buildAssistantActorContext } from "./acl.js";
+import {
+  assistantQueryEnvelopeSchema,
+  assistantSourceOpenEnvelopeSchema,
+  assistantSourcePreviewEnvelopeSchema,
+} from "./schemas.js";
+import {
+  AssistantAuthorizationError,
+  executeAssistantQuery,
+  getAssistantHealth,
+  getAssistantSourceOpen,
+  getAssistantSourcePreview,
+} from "./service.js";
 
 function asyncHandler(
   handler: (req: express.Request, res: express.Response, next: express.NextFunction) => Promise<unknown>,
@@ -33,8 +44,55 @@ export function createAssistantRouter() {
       return sendError(res, 400, "Invalid assistant query payload.");
     }
 
-    const result = await executeAssistantQuery(parsed.data.query);
+    const actor = buildAssistantActorContext(res.locals.currentUser);
+    const result = await executeAssistantQuery(actor, parsed.data.query);
     return res.json({ result });
+  }));
+
+  router.post("/source-preview", asyncHandler(async (req, res) => {
+    if (!config.assistant.enabled) {
+      return sendError(res, 503, "Assistant search is disabled in this environment.");
+    }
+
+    const parsed = assistantSourcePreviewEnvelopeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendError(res, 400, "Invalid assistant source preview payload.");
+    }
+
+    const actor = buildAssistantActorContext(res.locals.currentUser);
+
+    try {
+      const preview = await getAssistantSourcePreview(actor, parsed.data.preview.source);
+      return res.json(preview);
+    } catch (error) {
+      if (error instanceof AssistantAuthorizationError) {
+        return sendError(res, 403, error.message);
+      }
+      throw error;
+    }
+  }));
+
+  router.post("/source-open", asyncHandler(async (req, res) => {
+    if (!config.assistant.enabled) {
+      return sendError(res, 503, "Assistant search is disabled in this environment.");
+    }
+
+    const parsed = assistantSourceOpenEnvelopeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendError(res, 400, "Invalid assistant source open payload.");
+    }
+
+    const actor = buildAssistantActorContext(res.locals.currentUser);
+
+    try {
+      const open = await getAssistantSourceOpen(actor, parsed.data.open.source);
+      return res.json(open);
+    } catch (error) {
+      if (error instanceof AssistantAuthorizationError) {
+        return sendError(res, 403, error.message);
+      }
+      throw error;
+    }
   }));
 
   return router;

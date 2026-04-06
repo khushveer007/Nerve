@@ -23,6 +23,29 @@ export interface AssistantCitationLocator {
   char_end: number
 }
 
+export interface AssistantSourceReference {
+  asset_id: string
+  asset_version_id: string
+  chunk_id: string
+  entry_id: string
+  source_kind: 'entry'
+}
+
+export interface AssistantResultActionAvailability {
+  available: boolean
+}
+
+export interface AssistantResultActions {
+  preview: AssistantResultActionAvailability
+  open_source: AssistantResultActionAvailability
+}
+
+export interface AssistantSourceOpenTarget {
+  kind: 'internal'
+  path: string
+  label: string
+}
+
 export interface AssistantEntryMetadata {
   source_kind: 'entry'
   entry_id: string
@@ -51,6 +74,7 @@ export interface AssistantEntryResult {
   score: number
   metadata: AssistantEntryMetadata
   citation_locator: AssistantCitationLocator
+  actions: AssistantResultActions
 }
 
 export interface AssistantCitation {
@@ -71,6 +95,37 @@ export interface AssistantQueryResult {
   results: AssistantEntryResult[]
   follow_up_suggestions: string[]
   request_id: string
+}
+
+export interface AssistantSourcePreviewRequest {
+  preview: {
+    source: AssistantSourceReference
+  }
+}
+
+export interface AssistantSourcePreviewPayload {
+  source: AssistantSourceReference
+  title: string
+  excerpt: string
+  metadata: AssistantEntryMetadata
+  open_target: AssistantSourceOpenTarget
+}
+
+export interface AssistantSourcePreviewResult {
+  preview: AssistantSourcePreviewPayload
+}
+
+export interface AssistantSourceOpenRequest {
+  open: {
+    source: AssistantSourceReference
+  }
+}
+
+export interface AssistantSourceOpenResult {
+  open: {
+    source: AssistantSourceReference
+    target: AssistantSourceOpenTarget
+  }
 }
 
 export interface AssistantQueryRequest {

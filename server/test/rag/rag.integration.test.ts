@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CreateEntryInput } from "../../db.js";
 import {
   createTestRuntime,
   drainKnowledgeJobs,
@@ -17,6 +18,60 @@ afterEach(async () => {
     }
   }
 });
+
+const SUPER_ADMIN_ACTOR = {
+  authenticated: true as const,
+  user_id: "sa-001",
+  role: "super_admin" as const,
+  team_id: null,
+};
+
+async function createIndexedEntry(
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  input: CreateEntryInput,
+) {
+  const entry = await runtime.modules.db.createEntry(input);
+  await runtime.modules.jobs.enqueueEntryReindex(entry.id);
+  await drainKnowledgeJobs(runtime.modules.jobs);
+
+  const asset = await runtime.modules.ragDb.getKnowledgeAssetBySourceId(entry.id);
+  if (!asset) {
+    throw new Error(`Expected an indexed knowledge asset for entry ${entry.id}.`);
+  }
+
+  return { entry, asset };
+}
+
+async function getSourceReference(
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  assetId: string,
+  entryId: string,
+) {
+  const row = await runtime.modules.db.pool.query<{
+    asset_version_id: string;
+    chunk_id: string;
+  }>(
+    `SELECT kc.asset_version_id, kc.id AS chunk_id
+       FROM knowledge_chunks kc
+      WHERE kc.asset_id = $1
+      ORDER BY kc.chunk_no ASC
+      LIMIT 1`,
+    [assetId],
+  );
+
+  const source = row.rows[0];
+  if (!source) {
+    throw new Error(`Expected a source chunk for asset ${assetId}.`);
+  }
+
+  return {
+    asset_id: assetId,
+    asset_version_id: source.asset_version_id,
+    chunk_id: source.chunk_id,
+    entry_id: entryId,
+    source_kind: "entry" as const,
+  };
+}
 
 describe("Story 1.2 RAG backend", () => {
   it("runs the migration runner idempotently and safely under parallel startup", async () => {
@@ -129,6 +184,7 @@ describe("Story 1.2 RAG backend", () => {
     expect(activeJobs.rows[0]?.count).toBe(1);
 
     const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
+      actor: SUPER_ADMIN_ACTOR,
       queryText: "Adobe Creative Suite",
       filters: {
         departments: [],
@@ -207,6 +263,7 @@ describe("Story 1.2 RAG backend", () => {
     expect(versions.rows[1]?.extraction_status).toBe("ready");
 
     const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
+      actor: SUPER_ADMIN_ACTOR,
       queryText: "Firefly training labs",
       filters: {
         departments: [],
@@ -250,6 +307,7 @@ describe("Story 1.2 RAG backend", () => {
     expect(asset?.status).toBe("ready");
 
     const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
+      actor: SUPER_ADMIN_ACTOR,
       queryText: "Adobe Creative Suite",
       filters: {
         departments: [],
@@ -428,6 +486,372 @@ describe("Story 1.2 RAG backend", () => {
     expect(payload.result.results[0]?.title).toContain("NABH");
     expect(payload.result.results[0]?.metadata.dept).toBe("Medical");
     expect(payload.result.results[0]?.snippet).toContain("NABH Accreditation");
+  });
+
+  it("launch-quality gate: filters team-scoped entry results down to the actor's team before snippets and citations are built", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    const indexModule = await import("../../index.js");
+    await indexModule.prepareApiRuntime();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const scopedEntry = await createIndexedEntry(runtime, {
+      title: "Team Scope Story 1.3 Result",
+      dept: "Design",
+      type: "Notice",
+      body: "Team scope story 1.3 result body for ACL validation.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["team-scope"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET visibility_scope = 'team',
+              owner_team_id = 'branding',
+              updated_at = NOW()
+        WHERE id = $1`,
+      [scopedEntry.asset.id],
+    );
+
+    const { server, baseUrl } = await startHttpServer(indexModule.app);
+
+    try {
+      const contentCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "content-user@parul.ac.in",
+        password: "contentuser123",
+      });
+      const blockedResponse = await fetch(`${baseUrl}/api/assistant/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: contentCookie,
+        },
+        body: JSON.stringify({
+          query: {
+            mode: "search",
+            text: "Team Scope Story 1.3 Result",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        }),
+      });
+
+      const blockedPayload = await blockedResponse.json() as {
+        result: {
+          results: Array<{ title: string }>;
+          citations: Array<{ title: string }>;
+        };
+      };
+
+      expect(blockedResponse.ok).toBe(true);
+      expect(blockedPayload.result.results).toHaveLength(0);
+      expect(blockedPayload.result.citations).toHaveLength(0);
+
+      const brandingCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "brand-user@parul.ac.in",
+        password: "branduser123",
+      });
+      const allowedResponse = await fetch(`${baseUrl}/api/assistant/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: brandingCookie,
+        },
+        body: JSON.stringify({
+          query: {
+            mode: "search",
+            text: "Team Scope Story 1.3 Result",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        }),
+      });
+
+      const allowedPayload = await allowedResponse.json() as {
+        result: {
+          results: Array<{ title: string; snippet: string }>;
+          citations: Array<{ title: string }>;
+        };
+      };
+
+      expect(allowedResponse.ok).toBe(true);
+      expect(allowedPayload.result.results).toHaveLength(1);
+      expect(allowedPayload.result.results[0]?.title).toContain("Team Scope Story 1.3 Result");
+      expect(allowedPayload.result.results[0]?.snippet).toContain("ACL validation");
+      expect(allowedPayload.result.citations).toHaveLength(1);
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  it("launch-quality gate: allows owner-scoped results only to the owning user", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    const indexModule = await import("../../index.js");
+    await indexModule.prepareApiRuntime();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const ownerEntry = await createIndexedEntry(runtime, {
+      title: "Owner Scope Story 1.3 Result",
+      dept: "Design",
+      type: "Notice",
+      body: "Owner scope story 1.3 result body for ACL validation.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["owner-scope"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET visibility_scope = 'owner',
+              owner_user_id = 'bu-001',
+              owner_team_id = 'branding',
+              updated_at = NOW()
+        WHERE id = $1`,
+      [ownerEntry.asset.id],
+    );
+
+    const { server, baseUrl } = await startHttpServer(indexModule.app);
+
+    try {
+      const nonOwnerCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "brand-lead@parul.ac.in",
+        password: "brandlead123",
+      });
+      const blockedResponse = await fetch(`${baseUrl}/api/assistant/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: nonOwnerCookie,
+        },
+        body: JSON.stringify({
+          query: {
+            mode: "search",
+            text: "Owner Scope Story 1.3 Result",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        }),
+      });
+
+      const blockedPayload = await blockedResponse.json() as {
+        result: {
+          results: Array<{ title: string }>;
+        };
+      };
+
+      expect(blockedResponse.ok).toBe(true);
+      expect(blockedPayload.result.results).toHaveLength(0);
+
+      const ownerCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "brand-user@parul.ac.in",
+        password: "branduser123",
+      });
+      const ownerResponse = await fetch(`${baseUrl}/api/assistant/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          query: {
+            mode: "search",
+            text: "Owner Scope Story 1.3 Result",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        }),
+      });
+
+      const ownerPayload = await ownerResponse.json() as {
+        result: {
+          results: Array<{ title: string }>;
+        };
+      };
+
+      expect(ownerResponse.ok).toBe(true);
+      expect(ownerPayload.result.results).toHaveLength(1);
+      expect(ownerPayload.result.results[0]?.title).toContain("Owner Scope Story 1.3 Result");
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  it("launch-quality gate: honors explicit ACL principals and rejects unauthorized preview/open requests without metadata leakage", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    const indexModule = await import("../../index.js");
+    await indexModule.prepareApiRuntime();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const explicitEntry = await createIndexedEntry(runtime, {
+      title: "Explicit ACL Story 1.3 Result",
+      dept: "Sciences",
+      type: "Notice",
+      body: "Explicit ACL story 1.3 result body for preview and open validation.",
+      priority: "High",
+      entry_date: "2026-04-06",
+      created_by: "ca-001",
+      tags: ["explicit-acl"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET visibility_scope = 'explicit_acl',
+              owner_team_id = 'content',
+              updated_at = NOW()
+        WHERE id = $1`,
+      [explicitEntry.asset.id],
+    );
+    await runtime.modules.db.pool.query(
+      `INSERT INTO knowledge_acl_principals (id, asset_id, principal_type, principal_id, permission)
+       VALUES ($1, $2, 'team', 'content', 'read')`,
+      [`acl-${explicitEntry.asset.id}`, explicitEntry.asset.id],
+    );
+
+    const sourceReference = await getSourceReference(runtime, explicitEntry.asset.id, explicitEntry.entry.id);
+    const { server, baseUrl } = await startHttpServer(indexModule.app);
+
+    try {
+      const brandingCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "brand-user@parul.ac.in",
+        password: "branduser123",
+      });
+      const blockedQuery = await fetch(`${baseUrl}/api/assistant/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: brandingCookie,
+        },
+        body: JSON.stringify({
+          query: {
+            mode: "search",
+            text: "Explicit ACL Story 1.3 Result",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        }),
+      });
+      const blockedQueryPayload = await blockedQuery.json() as {
+        result: {
+          results: Array<{ title: string }>;
+          citations: Array<{ title: string }>;
+        };
+      };
+
+      expect(blockedQuery.ok).toBe(true);
+      expect(blockedQueryPayload.result.results).toHaveLength(0);
+      expect(blockedQueryPayload.result.citations).toHaveLength(0);
+
+      const blockedPreview = await fetch(`${baseUrl}/api/assistant/source-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: brandingCookie,
+        },
+        body: JSON.stringify({
+          preview: {
+            source: sourceReference,
+          },
+        }),
+      });
+      const blockedPreviewPayload = await blockedPreview.json() as { message: string };
+
+      expect(blockedPreview.status).toBe(403);
+      expect(blockedPreviewPayload.message).toBe("You are not authorized to access that source.");
+      expect(JSON.stringify(blockedPreviewPayload)).not.toContain("Explicit ACL Story 1.3 Result");
+
+      const blockedOpen = await fetch(`${baseUrl}/api/assistant/source-open`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: brandingCookie,
+        },
+        body: JSON.stringify({
+          open: {
+            source: sourceReference,
+          },
+        }),
+      });
+      const blockedOpenPayload = await blockedOpen.json() as { message: string };
+
+      expect(blockedOpen.status).toBe(403);
+      expect(blockedOpenPayload.message).toBe("You are not authorized to access that source.");
+      expect(JSON.stringify(blockedOpenPayload)).not.toContain("Explicit ACL Story 1.3 Result");
+
+      const contentCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "content-user@parul.ac.in",
+        password: "contentuser123",
+      });
+
+      const allowedPreview = await fetch(`${baseUrl}/api/assistant/source-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: contentCookie,
+        },
+        body: JSON.stringify({
+          preview: {
+            source: sourceReference,
+          },
+        }),
+      });
+      const allowedPreviewPayload = await allowedPreview.json() as {
+        preview: {
+          title: string;
+          excerpt: string;
+          open_target: { path: string };
+        };
+      };
+
+      expect(allowedPreview.ok).toBe(true);
+      expect(allowedPreviewPayload.preview.title).toContain("Explicit ACL Story 1.3 Result");
+      expect(allowedPreviewPayload.preview.excerpt).toContain("preview and open validation");
+      expect(allowedPreviewPayload.preview.open_target.path).toContain("/browse?");
+    } finally {
+      await stopHttpServer(server);
+    }
   });
 
   it("keeps the assistant disabled path out of startup indexing and query execution", async () => {
@@ -640,6 +1064,7 @@ describe("Story 1.2 RAG backend", () => {
       expect(deleteResponse.status).toBe(200);
 
       const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
+        actor: SUPER_ADMIN_ACTOR,
         queryText: "Adobe Creative Suite",
         filters: {
           departments: [],

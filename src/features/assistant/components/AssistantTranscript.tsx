@@ -1,12 +1,17 @@
 import { ExternalLink, FileSearch, SearchX } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-import type { AssistantMessage } from '../types'
+import type { AssistantEntryResult, AssistantMessage } from '../types'
 
 interface AssistantTranscriptProps {
   messages: AssistantMessage[]
+  onOpenSource: (result: AssistantEntryResult) => void
+  onPreviewSource: (result: AssistantEntryResult) => void
+  openSourcePendingId?: string | null
+  previewSourcePendingId?: string | null
 }
 
 function formatTimestamp(timestamp: string) {
@@ -20,7 +25,13 @@ function formatCountLabel(count: number) {
   return `${count} matching entry-backed result${count === 1 ? '' : 's'}`
 }
 
-export default function AssistantTranscript({ messages }: AssistantTranscriptProps) {
+export default function AssistantTranscript({
+  messages,
+  onOpenSource,
+  onPreviewSource,
+  openSourcePendingId = null,
+  previewSourcePendingId = null,
+}: AssistantTranscriptProps) {
   return (
     <Card className="border-border/70">
       <CardHeader className="pb-4">
@@ -84,7 +95,11 @@ export default function AssistantTranscript({ messages }: AssistantTranscriptPro
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {message.result.results.map((result) => (
+                    {message.result.results.map((result) => {
+                      const previewAvailable = result.actions?.preview.available ?? true
+                      const openSourceAvailable = result.actions?.open_source.available ?? true
+
+                      return (
                       <div className="rounded-2xl border border-border/70 bg-background/90 p-4" key={result.chunk_id}>
                         <div className="mb-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline">Entry</Badge>
@@ -127,9 +142,37 @@ export default function AssistantTranscript({ messages }: AssistantTranscriptPro
                               <span className="break-all">{result.metadata.external_link}</span>
                             </div>
                           )}
+
+                          {(previewAvailable || openSourceAvailable) && (
+                            <div className="flex flex-wrap gap-2 pt-2">
+                              {previewAvailable && (
+                                <Button
+                                  disabled={previewSourcePendingId === result.chunk_id}
+                                  onClick={() => onPreviewSource(result)}
+                                  size="sm"
+                                  type="button"
+                                  variant="outline"
+                                >
+                                  {previewSourcePendingId === result.chunk_id ? 'Loading preview...' : 'Preview'}
+                                </Button>
+                              )}
+
+                              {openSourceAvailable && (
+                                <Button
+                                  disabled={openSourcePendingId === result.chunk_id}
+                                  onClick={() => onOpenSource(result)}
+                                  size="sm"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  {openSourcePendingId === result.chunk_id ? 'Opening source...' : 'Open source'}
+                                </Button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>

@@ -3,6 +3,14 @@ export type KnowledgeJobStatus = "queued" | "running" | "succeeded" | "failed" |
 export type KnowledgeJobType = "extract" | "normalize" | "chunk" | "embed" | "reindex" | "delete";
 export type KnowledgeVisibilityScope = "authenticated" | "team" | "owner" | "explicit_acl";
 export type AssistantQueryMode = "auto" | "search" | "ask";
+export type AssistantActorRole = "super_admin" | "admin" | "sub_admin" | "user";
+
+export interface AssistantActorContext {
+  authenticated: true;
+  user_id: string;
+  role: AssistantActorRole;
+  team_id: string | null;
+}
 
 export interface AssistantQueryFilters {
   departments: string[];
@@ -15,6 +23,29 @@ export interface AssistantQueryInput {
   mode: AssistantQueryMode;
   text: string;
   filters: AssistantQueryFilters;
+}
+
+export interface AssistantSourceReference {
+  asset_id: string;
+  asset_version_id: string;
+  chunk_id: string;
+  entry_id: string;
+  source_kind: "entry";
+}
+
+export interface AssistantResultActionAvailability {
+  available: boolean;
+}
+
+export interface AssistantResultActions {
+  preview: AssistantResultActionAvailability;
+  open_source: AssistantResultActionAvailability;
+}
+
+export interface AssistantSourceOpenTarget {
+  kind: "internal";
+  path: string;
+  label: string;
 }
 
 export interface EntryKnowledgeMetadata {
@@ -58,6 +89,7 @@ export interface AssistantEntrySearchResult {
   score: number;
   metadata: EntryKnowledgeMetadata;
   citation_locator: CitationLocator;
+  actions: AssistantResultActions;
 }
 
 export interface AssistantCitation {
@@ -78,6 +110,25 @@ export interface AssistantQueryResult {
   results: AssistantEntrySearchResult[];
   follow_up_suggestions: string[];
   request_id: string;
+}
+
+export interface AssistantSourcePreview {
+  source: AssistantSourceReference;
+  title: string;
+  excerpt: string;
+  metadata: EntryKnowledgeMetadata;
+  open_target: AssistantSourceOpenTarget;
+}
+
+export interface AssistantSourcePreviewResult {
+  preview: AssistantSourcePreview;
+}
+
+export interface AssistantSourceOpenResult {
+  open: {
+    source: AssistantSourceReference;
+    target: AssistantSourceOpenTarget;
+  };
 }
 
 export interface AssistantHealthSnapshot {

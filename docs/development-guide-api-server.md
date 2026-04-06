@@ -117,6 +117,7 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 2. Keep retrieval/indexing code in `server/rag/*`, not inline in `server/index.ts`
 3. Update the worker path in `server/workers/rag-worker.ts` when queue semantics change
 4. Extend `server/test/rag/*` and the assistant client tests together so backend and shell behavior stay aligned
+5. Preserve the session-driven actor handoff from route -> zod schema -> service -> ACL/db helpers so assistant retrieval never falls back to anonymous access
 
 ### Change auth or role behavior
 

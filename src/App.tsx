@@ -15,6 +15,7 @@ import VerifyEmailPage from "@/pages/VerifyEmail";
 
 // Shared
 import BrowsePage from "@/pages/Browse";
+import AssistantSourcePage from "@/pages/AssistantSource";
 import AddEntryPage from "@/pages/AddEntry";
 import TeamPanel from "@/pages/TeamPanel";
 
@@ -153,6 +154,11 @@ const App = () => (
               } />
 
               {/* ── Browse — all authenticated ── */}
+              <Route path="/browse/source" element={
+                <RoleGuard allowed={['super_admin', 'admin', 'sub_admin', 'user']}>
+                  <AssistantSourcePage />
+                </RoleGuard>
+              } />
               <Route path="/browse" element={<BrowsePage />} />
 
               {/* ── Team panel (super admin sees both) ── */}

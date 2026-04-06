@@ -22,11 +22,18 @@ import { useIsMobile } from '@/hooks/use-mobile'
 
 import { ASSISTANT_STARTER_PROMPTS, getAssistantAnnouncement } from '../constants'
 import { useAssistantAvailability } from '../hooks/useAssistantAvailability'
-import { useAssistantQuery } from '../hooks/useAssistantQuery'
+import {
+  useAssistantQuery,
+  useAssistantSourceOpen,
+  useAssistantSourcePreview,
+} from '../hooks/useAssistantQuery'
 import type {
+  AssistantEntryResult,
   AssistantMessage,
   AssistantMode,
   AssistantQueryResult,
+  AssistantSourceReference,
+  AssistantSourcePreviewPayload,
   AssistantVisibleState,
 } from '../types'
 import AssistantComposer from './AssistantComposer'
@@ -68,12 +75,23 @@ export default function AssistantPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [pendingConversationId, setPendingConversationId] = useState<number | null>(null)
+  const [selectedPreview, setSelectedPreview] = useState<AssistantEntryResult | null>(null)
+  const [selectedPreviewPayload, setSelectedPreviewPayload] = useState<AssistantSourcePreviewPayload | null>(null)
+  const [sourceActionError, setSourceActionError] = useState<null | {
+    title: string
+    description: string
+  }>(null)
 
   const conversationIdRef = useRef(0)
+  const sourceActionScopeRef = useRef(0)
+  const previewRequestIdRef = useRef(0)
+  const openRequestIdRef = useRef(0)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const isMobile = useIsMobile()
   const { availability, isChecking, showUnavailable } = useAssistantAvailability()
   const queryMutation = useAssistantQuery()
+  const previewMutation = useAssistantSourcePreview()
+  const openMutation = useAssistantSourceOpen()
 
   const hasTranscript = messages.length > 0
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
@@ -143,6 +161,103 @@ export default function AssistantPage() {
     composerRef.current?.focus()
   }
 
+  function invalidateSourceActions() {
+    sourceActionScopeRef.current += 1
+    setSelectedPreview(null)
+    setSelectedPreviewPayload(null)
+    setSourceActionError(null)
+  }
+
+  function buildSourceReference(result: AssistantEntryResult): AssistantSourceReference {
+    return {
+      asset_id: result.asset_id,
+      asset_version_id: result.asset_version_id,
+      chunk_id: result.chunk_id,
+      entry_id: result.entry_id,
+      source_kind: 'entry',
+    }
+  }
+
+  async function handlePreviewSource(result: AssistantEntryResult) {
+    const sourceActionScope = sourceActionScopeRef.current
+    const requestId = ++previewRequestIdRef.current
+    setSourceActionError(null)
+
+    try {
+      const payload = await previewMutation.mutateAsync({
+        preview: {
+          source: buildSourceReference(result),
+        },
+      })
+
+      if (
+        sourceActionScope !== sourceActionScopeRef.current
+        || requestId !== previewRequestIdRef.current
+      ) {
+        return
+      }
+
+      setSelectedPreview(result)
+      setSelectedPreviewPayload(payload.preview)
+      setEvidenceOpen(true)
+    } catch (error) {
+      if (
+        sourceActionScope !== sourceActionScopeRef.current
+        || requestId !== previewRequestIdRef.current
+      ) {
+        return
+      }
+
+      setSelectedPreview(null)
+      setSelectedPreviewPayload(null)
+      setEvidenceOpen(true)
+      setSourceActionError({
+        title: 'Source preview unavailable.',
+        description: error instanceof Error
+          ? error.message
+          : 'The assistant could not open that source preview.',
+      })
+    }
+  }
+
+  async function handleOpenSource(result: AssistantEntryResult) {
+    const sourceActionScope = sourceActionScopeRef.current
+    const requestId = ++openRequestIdRef.current
+    setSourceActionError(null)
+
+    try {
+      const payload = await openMutation.mutateAsync({
+        open: {
+          source: buildSourceReference(result),
+        },
+      })
+
+      if (
+        sourceActionScope !== sourceActionScopeRef.current
+        || requestId !== openRequestIdRef.current
+      ) {
+        return
+      }
+
+      window.location.assign(payload.open.target.path)
+    } catch (error) {
+      if (
+        sourceActionScope !== sourceActionScopeRef.current
+        || requestId !== openRequestIdRef.current
+      ) {
+        return
+      }
+
+      setEvidenceOpen(true)
+      setSourceActionError({
+        title: 'Source open unavailable.',
+        description: error instanceof Error
+          ? error.message
+          : 'The assistant could not open that source.',
+      })
+    }
+  }
+
   async function handleSubmit(nextPrompt?: string) {
     const content = (nextPrompt ?? draft).trim()
 
@@ -163,6 +278,7 @@ export default function AssistantPage() {
     setMessages((current) => [...current, userMessage])
     setDraft('')
     setPendingConversationId(conversationId)
+    invalidateSourceActions()
     focusComposer()
 
     if (showUnavailable) {
@@ -241,7 +357,10 @@ export default function AssistantPage() {
   function handleNewConversation() {
     conversationIdRef.current += 1
     setPendingConversationId(null)
+    invalidateSourceActions()
     queryMutation.reset()
+    previewMutation.reset()
+    openMutation.reset()
     setMessages([])
     setDraft('')
     focusComposer()
@@ -267,7 +386,17 @@ export default function AssistantPage() {
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-4">
           {hasTranscript ? (
-            <AssistantTranscript messages={messages} />
+            <AssistantTranscript
+              messages={messages}
+              onOpenSource={(result) => {
+                void handleOpenSource(result)
+              }}
+              onPreviewSource={(result) => {
+                void handlePreviewSource(result)
+              }}
+              openSourcePendingId={openMutation.isPending ? (openMutation.variables?.open.source.chunk_id ?? null) : null}
+              previewSourcePendingId={previewMutation.isPending ? (previewMutation.variables?.preview.source.chunk_id ?? null) : null}
+            />
           ) : (
             <AssistantEmptyState prompts={ASSISTANT_STARTER_PROMPTS} onPromptSelect={handleSubmit} />
           )}
@@ -294,7 +423,17 @@ export default function AssistantPage() {
         </div>
 
         <div className="hidden lg:block">
-          <AssistantContextPanel mode={mode} transcriptCount={messages.length} />
+          <AssistantContextPanel
+            mode={mode}
+            onOpenSource={selectedPreview ? () => {
+              void handleOpenSource(selectedPreview)
+            } : undefined}
+            openSourcePending={openMutation.isPending}
+            preview={selectedPreviewPayload}
+            previewError={sourceActionError}
+            previewLoading={previewMutation.isPending}
+            transcriptCount={messages.length}
+          />
         </div>
       </div>
 
@@ -314,13 +453,13 @@ export default function AssistantPage() {
           <DrawerContent>
             <DrawerHeader>
               <DrawerTitle>Filters</DrawerTitle>
-              <DrawerDescription>Filter and scope controls will connect here in the next story.</DrawerDescription>
-            </DrawerHeader>
-            <div className="px-4 pb-6">
-              <AssistantContextPanel mode={mode} section="filters" transcriptCount={messages.length} />
-            </div>
-          </DrawerContent>
-        </Drawer>
+            <DrawerDescription>Filter and scope controls will connect here in the next story.</DrawerDescription>
+          </DrawerHeader>
+          <div className="px-4 pb-6">
+            <AssistantContextPanel mode={mode} section="filters" transcriptCount={messages.length} />
+          </div>
+        </DrawerContent>
+      </Drawer>
       ) : (
         <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
           <SheetContent className="w-full sm:max-w-lg" side="right">
@@ -340,11 +479,22 @@ export default function AssistantPage() {
           <DrawerHeader>
             <DrawerTitle>Evidence</DrawerTitle>
             <DrawerDescription>
-              This drawer reserves the mobile evidence surface for citations and supporting passages.
+              This drawer shows permission-safe supporting source previews for assistant results.
             </DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-6">
-            <AssistantContextPanel mode={mode} section="evidence" transcriptCount={messages.length} />
+            <AssistantContextPanel
+              mode={mode}
+              onOpenSource={selectedPreview ? () => {
+                void handleOpenSource(selectedPreview)
+              } : undefined}
+              openSourcePending={openMutation.isPending}
+              preview={selectedPreviewPayload}
+              previewError={sourceActionError}
+              previewLoading={previewMutation.isPending}
+              section="evidence"
+              transcriptCount={messages.length}
+            />
           </div>
         </DrawerContent>
       </Drawer>

@@ -1,6 +1,6 @@
 # Nerve - Data Models (`api-server`)
 
-**Date:** 2026-04-05
+**Date:** 2026-04-06
 **Part:** `api-server`
 
 ## Overview
@@ -107,11 +107,19 @@ Story 1.2 adds a migration-managed retrieval layer in `server/migrations/` and `
 | `title` | `TEXT` | Search/display title |
 | `mime_type` | `TEXT` | Phase 1 entries use `text/markdown` |
 | `media_type` | `TEXT` | `text`, `pdf`, `image`, `doc` |
-| `visibility_scope` | `TEXT` | Defaults to `authenticated` for entries |
+| `owner_user_id` | `TEXT` | Derived from `entries.created_by` for assistant ACL checks |
+| `owner_team_id` | `TEXT` | Derived from the creator's `users.team` for team-scoped ACL checks |
+| `visibility_scope` | `TEXT` | `authenticated`, `team`, `owner`, `explicit_acl`; Phase 1 entries still default to `authenticated` unless changed later |
 | `status` | `TEXT` | `pending`, `processing`, `ready`, `failed`, `deleted` |
 | `metadata` | `JSONB` | Preserves ranking/filtering metadata such as `dept`, `type`, `tags`, `entry_date`, `priority`, and related fields |
 | `sha256` | `TEXT` | Source hash of the current indexed content |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | Lifecycle timestamps |
+
+**Assistant ACL notes:**
+
+- Query-time authorization is enforced against `knowledge_assets`, not against ad hoc entry rendering logic.
+- The active ACL decision path combines the session actor (`user_id`, `role`, `team_id`) with `visibility_scope`, `owner_user_id`, `owner_team_id`, and `knowledge_acl_principals`.
+- Assistant query results, citations, preview payloads, and open-source actions must all pass through the same derived access decision.
 
 ### `knowledge_asset_versions`
 
@@ -146,7 +154,17 @@ Story 1.2 adds a migration-managed retrieval layer in `server/migrations/` and `
 
 ### `knowledge_acl_principals`
 
-Explicit ACL rows reserved for later non-default visibility scopes.
+Explicit read principals for assets that move into `visibility_scope = 'explicit_acl'`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | Primary key |
+| `asset_id` | `TEXT` | FK to `knowledge_assets(id)` |
+| `principal_type` | `TEXT` | `user`, `team`, `role` |
+| `principal_id` | `TEXT` | Actor id matched against the current session context |
+| `permission` | `TEXT` | Currently `read` |
+
+**Notes:** Story 1.3 starts using these rows in the assistant path so explicit ACL assets can participate in retrieval, preview, and open-source checks without leaking metadata to unauthorized users.
 
 ### `knowledge_jobs`
 

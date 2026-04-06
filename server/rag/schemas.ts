@@ -18,3 +18,26 @@ export const assistantQueryEnvelopeSchema = z.object({
 }).strict();
 
 export type AssistantQueryEnvelope = z.infer<typeof assistantQueryEnvelopeSchema>;
+
+const assistantSourceReferenceSchema = z.object({
+  asset_id: z.string().min(1),
+  asset_version_id: z.string().min(1),
+  chunk_id: z.string().min(1),
+  entry_id: z.string().min(1),
+  source_kind: z.literal("entry"),
+}).strict();
+
+export const assistantSourcePreviewEnvelopeSchema = z.object({
+  preview: z.object({
+    source: assistantSourceReferenceSchema,
+  }).strict(),
+}).strict();
+
+export const assistantSourceOpenEnvelopeSchema = z.object({
+  open: z.object({
+    source: assistantSourceReferenceSchema,
+  }).strict(),
+}).strict();
+
+export type AssistantSourcePreviewEnvelope = z.infer<typeof assistantSourcePreviewEnvelopeSchema>;
+export type AssistantSourceOpenEnvelope = z.infer<typeof assistantSourceOpenEnvelopeSchema>;

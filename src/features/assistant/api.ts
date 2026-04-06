@@ -1,5 +1,13 @@
 import { ASSISTANT_UNAVAILABLE } from './constants'
-import type { AssistantAvailability, AssistantQueryRequest, AssistantQueryResult } from './types'
+import type {
+  AssistantAvailability,
+  AssistantQueryRequest,
+  AssistantQueryResult,
+  AssistantSourceOpenRequest,
+  AssistantSourceOpenResult,
+  AssistantSourcePreviewRequest,
+  AssistantSourcePreviewResult,
+} from './types'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 const ASSISTANT_HEALTH_PATH = (import.meta.env.VITE_ASSISTANT_HEALTH_PATH || '/assistant/health').replace(
@@ -82,5 +90,45 @@ export const assistantApi = {
     }
 
     return payload.result as AssistantQueryResult
+  },
+
+  async previewSource(input: AssistantSourcePreviewRequest): Promise<AssistantSourcePreviewResult> {
+    const response = await fetch(`${API_BASE_URL}/assistant/source-preview`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(payload.message || 'Assistant source preview failed.')
+    }
+
+    return payload as AssistantSourcePreviewResult
+  },
+
+  async openSource(input: AssistantSourceOpenRequest): Promise<AssistantSourceOpenResult> {
+    const response = await fetch(`${API_BASE_URL}/assistant/source-open`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    })
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(payload.message || 'Assistant source open failed.')
+    }
+
+    return payload as AssistantSourceOpenResult
   },
 }

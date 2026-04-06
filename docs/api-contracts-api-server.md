@@ -1,6 +1,6 @@
 # Nerve - API Contracts (`api-server`)
 
-**Date:** 2026-04-05
+**Date:** 2026-04-06
 **Part:** `api-server`
 
 ## Overview
@@ -47,6 +47,8 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 | `GET` | `/api/bootstrap` | Session | Fetch entries, users, teams, and optionally branding rows |
 | `GET` | `/api/assistant/health` | Session | Report backend and corpus readiness for the assistant shell |
 | `POST` | `/api/assistant/query` | Session | Search the Phase 1 entry-backed corpus |
+| `POST` | `/api/assistant/source-preview` | Session | Load a permission-safe assistant source preview |
+| `POST` | `/api/assistant/source-open` | Session | Resolve an authorized assistant source open target |
 | `GET` | `/api/entries` | Session | List entries |
 | `POST` | `/api/entries` | Session | Create entry |
 | `PATCH` | `/api/entries/:id` | Session | Update entry and trigger reindexing |
@@ -136,6 +138,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 - **Purpose:** Execute the first production assistant query path over entry-backed `knowledge_*` records.
 - **Auth:** Any authenticated user.
+- **Authorization Notes:** Retrieval is request-scoped and ACL-aware. The assistant evaluates the current session user, role, team, asset ownership, `visibility_scope`, and `knowledge_acl_principals` before it shapes snippets, citations, counts, or actions.
 - **Request Body:**
 
 ```json
@@ -174,6 +177,14 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
         "media_type": "text",
         "snippet": "Parul Institute of Medical Sciences and Research has been granted NABH accreditation...",
         "score": 2.17,
+        "actions": {
+          "preview": {
+            "available": true
+          },
+          "open_source": {
+            "available": true
+          }
+        },
         "metadata": {
           "dept": "Medical",
           "type": "Achievement",
@@ -192,6 +203,105 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 - **Notes:**
   - Story 1.2 is intentionally search-first, so `answer` remains `null` and `grounded` remains `false`.
   - Results are limited to `source_kind = "entry"` in this Phase 1 slice.
+  - Unauthorized assets are excluded before snippets, citations, and follow-up guidance are assembled.
+  - Blocked sources do not appear as disabled cards, teaser actions, hidden counts, or partial metadata.
+
+### `POST /api/assistant/source-preview`
+
+- **Purpose:** Return the minimum permission-safe preview payload required for the assistant evidence/context surface.
+- **Auth:** Any authenticated user.
+- **Request Body:**
+
+```json
+{
+  "preview": {
+    "source": {
+      "asset_id": "asset_123",
+      "asset_version_id": "assetver_123",
+      "chunk_id": "chunk_123",
+      "entry_id": "e-001",
+      "source_kind": "entry"
+    }
+  }
+}
+```
+
+- **Success Response:**
+
+```json
+{
+  "preview": {
+    "source": {
+      "asset_id": "asset_123",
+      "asset_version_id": "assetver_123",
+      "chunk_id": "chunk_123",
+      "entry_id": "e-001",
+      "source_kind": "entry"
+    },
+    "title": "Medical College Gets NABH Accreditation",
+    "excerpt": "Parul Institute of Medical Sciences and Research has been granted NABH accreditation...",
+    "metadata": {
+      "dept": "Medical",
+      "type": "Achievement",
+      "priority": "Key highlight"
+    },
+    "open_target": {
+      "kind": "internal",
+      "path": "/browse?assistantEntryId=e-001",
+      "label": "Open in Browse entries"
+    }
+  }
+}
+```
+
+- **Failure Cases:**
+  - `400` for malformed payload wrappers
+  - `403` with `{ "message": "You are not authorized to access that source." }` when the session actor is not allowed to preview the asset
+
+### `POST /api/assistant/source-open`
+
+- **Purpose:** Resolve an authorized internal source-open target without exposing a public file or upload URL.
+- **Auth:** Any authenticated user.
+- **Request Body:**
+
+```json
+{
+  "open": {
+    "source": {
+      "asset_id": "asset_123",
+      "asset_version_id": "assetver_123",
+      "chunk_id": "chunk_123",
+      "entry_id": "e-001",
+      "source_kind": "entry"
+    }
+  }
+}
+```
+
+- **Success Response:**
+
+```json
+{
+  "open": {
+    "source": {
+      "asset_id": "asset_123",
+      "asset_version_id": "assetver_123",
+      "chunk_id": "chunk_123",
+      "entry_id": "e-001",
+      "source_kind": "entry"
+    },
+    "target": {
+      "kind": "internal",
+      "path": "/browse?assistantEntryId=e-001",
+      "label": "Open in Browse entries"
+    }
+  }
+}
+```
+
+- **Failure Cases:**
+  - `400` for malformed payload wrappers
+  - `403` with `{ "message": "You are not authorized to access that source." }` when the session actor is not allowed to open the asset
 
 ### `GET /api/entries`
 

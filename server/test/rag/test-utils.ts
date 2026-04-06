@@ -156,15 +156,21 @@ export async function stopHttpServer(server: Server) {
   });
 }
 
-export async function loginAndGetSessionCookie(baseUrl: string) {
+export async function loginAndGetSessionCookie(
+  baseUrl: string,
+  credentials: { email: string; password: string } = {
+    email: process.env.SUPER_ADMIN_EMAIL!,
+    password: process.env.SUPER_ADMIN_PASSWORD!,
+  },
+) {
   const response = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      email: process.env.SUPER_ADMIN_EMAIL,
-      password: process.env.SUPER_ADMIN_PASSWORD,
+      email: credentials.email,
+      password: credentials.password,
     }),
   });
 

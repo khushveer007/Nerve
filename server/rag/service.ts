@@ -1,11 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
-import { getAssistantHealthSnapshot, searchEntryKnowledge } from "./db.js";
+import { buildAssistantSourceOpenPath } from "./acl.js";
+import {
+  getAssistantHealthSnapshot,
+  getAuthorizedAssistantEntrySource,
+  searchEntryKnowledge,
+} from "./db.js";
 import type {
+  AssistantActorContext,
   AssistantHealthResponse,
   AssistantQueryInput,
   AssistantQueryResult,
+  AssistantSourceOpenResult,
+  AssistantSourcePreviewResult,
+  AssistantSourceReference,
 } from "./types.js";
+
+export class AssistantAuthorizationError extends Error {}
 
 export async function getAssistantHealth(): Promise<AssistantHealthResponse> {
   if (!config.assistant.enabled) {
@@ -58,9 +69,13 @@ function buildFollowUpSuggestions(resultCount: number, mode: AssistantQueryResul
   ];
 }
 
-export async function executeAssistantQuery(input: AssistantQueryInput): Promise<AssistantQueryResult> {
+export async function executeAssistantQuery(
+  actor: AssistantActorContext,
+  input: AssistantQueryInput,
+): Promise<AssistantQueryResult> {
   const resolvedMode: AssistantQueryResult["mode"] = input.mode === "ask" ? "ask" : "search";
   const results = await searchEntryKnowledge({
+    actor,
     queryText: input.text,
     filters: input.filters,
     limit: config.assistant.queryResultLimit,
@@ -82,5 +97,58 @@ export async function executeAssistantQuery(input: AssistantQueryInput): Promise
     results,
     follow_up_suggestions: buildFollowUpSuggestions(results.length, resolvedMode),
     request_id: randomUUID(),
+  };
+}
+
+function buildOpenTarget(source: AssistantSourceReference) {
+  return {
+    kind: "internal" as const,
+    path: buildAssistantSourceOpenPath(source),
+    label: "Open source detail",
+  };
+}
+
+export async function getAssistantSourcePreview(
+  actor: AssistantActorContext,
+  source: AssistantSourceReference,
+): Promise<AssistantSourcePreviewResult> {
+  const preview = await getAuthorizedAssistantEntrySource({
+    actor,
+    source,
+  });
+
+  if (!preview) {
+    throw new AssistantAuthorizationError("You are not authorized to access that source.");
+  }
+
+  return {
+    preview: {
+      source,
+      title: preview.title,
+      excerpt: preview.excerpt,
+      metadata: preview.metadata,
+      open_target: buildOpenTarget(source),
+    },
+  };
+}
+
+export async function getAssistantSourceOpen(
+  actor: AssistantActorContext,
+  source: AssistantSourceReference,
+): Promise<AssistantSourceOpenResult> {
+  const authorizedSource = await getAuthorizedAssistantEntrySource({
+    actor,
+    source,
+  });
+
+  if (!authorizedSource) {
+    throw new AssistantAuthorizationError("You are not authorized to access that source.");
+  }
+
+  return {
+    open: {
+      source,
+      target: buildOpenTarget(source),
+    },
   };
 }
