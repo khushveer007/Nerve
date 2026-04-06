@@ -100,6 +100,23 @@ async function getSourceReference(
   };
 }
 
+function buildAnswerProviderPayload(claims: Array<{ text: string; citations: string[] }>) {
+  return {
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            claims,
+            follow_up_suggestions: [
+              "Open a supporting source below if you want to verify the cited entry evidence.",
+            ],
+          }),
+        },
+      },
+    ],
+  };
+}
+
 describe("Story 1.2 RAG backend", () => {
   it("runs the migration runner idempotently and safely under parallel startup", async () => {
     const runtime = await createTestRuntime();
@@ -866,8 +883,10 @@ describe("Story 1.2 RAG backend", () => {
     }
   });
 
-  it("routes clear synthesis-style auto queries to ask mode without fabricating answer text", async () => {
-    const runtime = await createTestRuntime();
+  it("returns grounded ask answers when accessible evidence is sufficient", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
     cleanups.push(runtime.cleanup);
 
     await runtime.modules.db.bootstrapDatabase();
@@ -875,17 +894,65 @@ describe("Story 1.2 RAG backend", () => {
     await runtime.modules.jobs.enqueueEntryBackfill();
     await drainKnowledgeJobs(runtime.modules.jobs);
 
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => buildAnswerProviderPayload([
+        {
+          text: "The medical college has NABH accreditation for patient care, infrastructure, and clinical outcomes.",
+          citations: ["S1"],
+        },
+      ]),
+    } as Response);
+
     const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
-      mode: "auto",
+      mode: "ask",
       text: "Summarize what Nerve says about NABH accreditation.",
       filters: EMPTY_FILTERS,
     });
 
     expect(result.mode).toBe("ask");
-    expect(result.answer).toBeNull();
-    expect(result.grounded).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.answer).toContain("NABH accreditation");
+    expect(result.answer).toContain("[S1]");
+    expect(result.grounded).toBe(true);
+    expect(result.enough_evidence).toBe(true);
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0]?.title).toContain("NABH");
     expect(result.results.length).toBeGreaterThan(0);
-    expect(result.follow_up_suggestions[0]).toMatch(/grounded answer synthesis/i);
+    expect(result.follow_up_suggestions[0]).toMatch(/supporting source/i);
+  });
+
+  it("routes sufficient synthesis-style auto queries to grounded ask answers", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => buildAnswerProviderPayload([
+        {
+          text: "The medical college has NABH accreditation according to the indexed entry corpus.",
+          citations: ["S1"],
+        },
+      ]),
+    } as Response);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "auto",
+      text: "Explain what Nerve says about NABH accreditation.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("ask");
+    expect(result.grounded).toBe(true);
+    expect(result.answer).toContain("[S1]");
+    expect(result.results.length).toBeGreaterThan(0);
   });
 
   it("keeps ambiguous auto queries explainable by resolving them to search mode", async () => {
@@ -1088,6 +1155,267 @@ describe("Story 1.2 RAG backend", () => {
         expect.stringMatching(/phase 1/i),
       ]),
     );
+  });
+
+  it("keeps zero-result search guidance neutral instead of upselling ask mode", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "search",
+      text: "Summarize the starlight orchard policy memo.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("search");
+    expect(result.results).toHaveLength(0);
+    expect(result.follow_up_suggestions).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/exact entry title/i),
+        expect.stringMatching(/phase 1/i),
+      ]),
+    );
+    expect(result.follow_up_suggestions.join(" ")).not.toMatch(/use ask mode/i);
+  });
+
+  it("abstains without calling the answer model when evidence is too weak", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    await createIndexedEntry(runtime, {
+      title: "Campus Wellness Update",
+      dept: "Design",
+      type: "Notice",
+      body: "This note mentions wellness activities for the semester.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["wellness"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "ask",
+      text: "Explain the campus safety escalation process.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.mode).toBe("ask");
+    expect(result.answer).toBeNull();
+    expect(result.grounded).toBe(false);
+    expect(result.enough_evidence).toBe(false);
+    expect(result.results.length).toBeGreaterThanOrEqual(0);
+    expect(result.follow_up_suggestions[0]).toMatch(/sources available to you/i);
+  });
+
+  it("abstains without calling the answer model when top evidence conflicts on a numeric answer", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    await createIndexedEntry(runtime, {
+      title: "Program Atlas seat count update",
+      dept: "Engineering",
+      type: "Program update",
+      body: "Program Atlas has 120 seats for the 2026 intake.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "ba-001",
+      tags: ["atlas", "seats"],
+      author_name: "Dr. Rajesh Kumar",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    await createIndexedEntry(runtime, {
+      title: "Program Atlas seat count update",
+      dept: "Engineering",
+      type: "Program update",
+      body: "Program Atlas has 180 seats for the 2026 intake.",
+      priority: "Normal",
+      entry_date: "2026-04-05",
+      created_by: "ba-001",
+      tags: ["atlas", "seats"],
+      author_name: "Dr. Rajesh Kumar",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "ask",
+      text: "How many seats does Program Atlas have?",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.answer).toBeNull();
+    expect(result.grounded).toBe(false);
+    expect(result.enough_evidence).toBe(false);
+    expect(result.results).toHaveLength(2);
+    expect(result.follow_up_suggestions.join(" ")).toMatch(/sources available to you/i);
+  });
+
+  it("abstains without calling the answer model when top evidence conflicts on a textual claim", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    await createIndexedEntry(runtime, {
+      title: "Program Atlas delivery mode update",
+      dept: "Engineering",
+      type: "Program update",
+      body: "Program Atlas will be delivered online for the 2026 intake.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "ba-001",
+      tags: ["atlas", "delivery"],
+      author_name: "Dr. Rajesh Kumar",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    await createIndexedEntry(runtime, {
+      title: "Program Atlas delivery mode update",
+      dept: "Engineering",
+      type: "Program update",
+      body: "Program Atlas will be delivered offline for the 2026 intake.",
+      priority: "Normal",
+      entry_date: "2026-04-05",
+      created_by: "ba-001",
+      tags: ["atlas", "delivery"],
+      author_name: "Dr. Rajesh Kumar",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "ask",
+      text: "Is Program Atlas online or offline for the 2026 intake?",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.answer).toBeNull();
+    expect(result.grounded).toBe(false);
+    expect(result.enough_evidence).toBe(false);
+    expect(result.results).toHaveLength(2);
+    expect(result.follow_up_suggestions.join(" ")).toMatch(/sources available to you/i);
+  });
+
+  it("keeps grounded ask citations and supporting results ACL-safe", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const accessibleEntry = await createIndexedEntry(runtime, {
+      title: "Brand Design Standards Update",
+      dept: "Design",
+      type: "Notice",
+      body: "The brand design standards were updated with a verified accessibility review.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["brand", "standards"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    const blockedEntry = await createIndexedEntry(runtime, {
+      title: "Hidden Design Standards Draft",
+      dept: "Design",
+      type: "Notice",
+      body: "This hidden draft should never appear through answer citations or fallback guidance.",
+      priority: "High",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["brand", "standards"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET visibility_scope = 'team',
+              owner_team_id = 'branding',
+              updated_at = NOW()
+        WHERE id = $1`,
+      [blockedEntry.asset.id],
+    );
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => buildAnswerProviderPayload([
+        {
+          text: "The accessible standards update confirms a verified accessibility review.",
+          citations: ["S1"],
+        },
+      ]),
+    } as Response);
+
+    const contentActor = {
+      authenticated: true as const,
+      user_id: "cu-001",
+      role: "user" as const,
+      team_id: "content",
+    };
+
+    const result = await runtime.modules.service.executeAssistantQuery(contentActor, {
+      mode: "ask",
+      text: "Explain the design standards update.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.grounded).toBe(true);
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0]?.title).toBe(accessibleEntry.entry.title);
+    expect(result.results.map((item) => item.title)).toContain(accessibleEntry.entry.title);
+    expect(result.results.map((item) => item.title)).not.toContain(blockedEntry.entry.title);
+    expect(result.answer).not.toContain("Hidden Design Standards Draft");
+    expect(result.follow_up_suggestions.join(" ")).not.toContain("Hidden Design Standards Draft");
   });
 
   it("applies department and inclusive date-range filters before shaping assistant results", async () => {

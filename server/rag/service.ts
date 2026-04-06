@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { buildAssistantSourceOpenPath } from "./acl.js";
+import {
+  answerGenerationEnabled,
+  assessGroundedAnswerEvidence,
+  buildAskFollowUpSuggestions,
+  generateGroundedAnswer,
+} from "./answering.js";
 import { embeddingsEnabled, embedQueryText } from "./embeddings.js";
 import {
   getAssistantHealthSnapshot,
@@ -50,25 +56,39 @@ export async function getAssistantHealth(): Promise<AssistantHealthResponse> {
   };
 }
 
-function buildFollowUpSuggestions(resultCount: number, mode: AssistantQueryResult["mode"]) {
-  if (resultCount === 0) {
-    return [
-      "Try an exact entry title, department name, or date range from the existing corpus.",
-      "Keep queries entry-focused in Phase 1 because uploads and mixed media arrive in later stories.",
-    ];
-  }
+function buildSourceReference(result: AssistantQueryResult["results"][number]): AssistantSourceReference {
+  return {
+    asset_id: result.asset_id,
+    asset_version_id: result.asset_version_id,
+    chunk_id: result.chunk_id,
+    entry_id: result.entry_id,
+    source_kind: "entry",
+  };
+}
 
-  if (mode === "ask") {
-    return [
-      "Grounded answer synthesis is still not enabled, so this turn returns evidence-backed entry matches only.",
-      "Refine the query with a department, title phrase, or date to narrow the corpus.",
-    ];
-  }
+async function loadGroundedAnswerEvidence(
+  actor: AssistantActorContext,
+  results: AssistantQueryResult["results"],
+) {
+  const selectedResults = results.slice(0, 3);
+  const previews = await Promise.all(selectedResults.map(async (result, index) => {
+    const preview = await getAuthorizedAssistantEntrySource({
+      actor,
+      source: buildSourceReference(result),
+    });
 
-  return [
-    "Refine the query with a department, title phrase, or date range to narrow the corpus.",
-    "Switch to Ask mode later when grounded synthesis is enabled on top of this corpus.",
-  ];
+    if (!preview) {
+      return null;
+    }
+
+    return {
+      label: `S${index + 1}`,
+      result,
+      excerpt: preview.excerpt,
+    };
+  }));
+
+  return previews.filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
 export async function executeAssistantQuery(
@@ -76,6 +96,7 @@ export async function executeAssistantQuery(
   input: AssistantQueryInput,
 ): Promise<AssistantQueryResult> {
   const resolvedMode = resolveAssistantMode(input).mode;
+  const requestId = randomUUID();
   let queryEmbedding: string | null = null;
 
   if (embeddingsEnabled()) {
@@ -95,25 +116,90 @@ export async function executeAssistantQuery(
     limit: config.assistant.queryResultLimit,
   });
 
-  return {
-    mode: resolvedMode,
-    answer: null,
-    enough_evidence: search.totalCount > 0,
-    grounded: false,
-    citations: search.results.slice(0, 3).map((result, index) => ({
-      label: `S${index + 1}`,
-      asset_id: result.asset_id,
-      title: result.title,
-      source_kind: "entry",
-      snippet: result.snippet,
-      citation_locator: result.citation_locator,
-    })),
-    applied_filters: input.filters,
-    total_results: search.totalCount,
-    results: search.results,
-    follow_up_suggestions: buildFollowUpSuggestions(search.totalCount, resolvedMode),
-    request_id: randomUUID(),
-  };
+  if (resolvedMode === "search") {
+    return {
+      mode: resolvedMode,
+      answer: null,
+      enough_evidence: search.totalCount > 0,
+      grounded: false,
+      citations: [],
+      applied_filters: input.filters,
+      total_results: search.totalCount,
+      results: search.results,
+      follow_up_suggestions: buildAskFollowUpSuggestions(
+        search.totalCount === 0 ? "no_results" : "search",
+        search.totalCount,
+      ),
+      request_id: requestId,
+    };
+  }
+
+  const answerEvidence = await loadGroundedAnswerEvidence(actor, search.results);
+  const assessment = assessGroundedAnswerEvidence(input.text, answerEvidence);
+
+  if (!assessment.enoughEvidence) {
+    return {
+      mode: resolvedMode,
+      answer: null,
+      enough_evidence: false,
+      grounded: false,
+      citations: [],
+      applied_filters: input.filters,
+      total_results: search.totalCount,
+      results: search.results,
+      follow_up_suggestions: buildAskFollowUpSuggestions(
+        assessment.reason === 'sufficient' ? 'weak_evidence' : assessment.reason,
+        search.totalCount,
+      ),
+      request_id: requestId,
+    };
+  }
+
+  if (!answerGenerationEnabled()) {
+    return {
+      mode: resolvedMode,
+      answer: null,
+      enough_evidence: true,
+      grounded: false,
+      citations: [],
+      applied_filters: input.filters,
+      total_results: search.totalCount,
+      results: search.results,
+      follow_up_suggestions: buildAskFollowUpSuggestions("answer_service_unavailable", search.totalCount),
+      request_id: requestId,
+    };
+  }
+
+  try {
+    const groundedAnswer = await generateGroundedAnswer(input.text, assessment.evidence);
+
+    return {
+      mode: resolvedMode,
+      answer: groundedAnswer.answer,
+      enough_evidence: true,
+      grounded: true,
+      citations: groundedAnswer.citations,
+      applied_filters: input.filters,
+      total_results: search.totalCount,
+      results: search.results,
+      follow_up_suggestions: groundedAnswer.followUpSuggestions,
+      request_id: requestId,
+    };
+  } catch {
+    return {
+      mode: resolvedMode,
+      answer: null,
+      enough_evidence: true,
+      grounded: false,
+      citations: [],
+      applied_filters: input.filters,
+      total_results: search.totalCount,
+      results: search.results,
+      follow_up_suggestions: buildAskFollowUpSuggestions("answer_service_unavailable", search.totalCount),
+      request_id: requestId,
+    };
+  }
+
 }
 
 function buildOpenTarget(source: AssistantSourceReference) {

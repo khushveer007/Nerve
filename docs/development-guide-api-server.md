@@ -33,6 +33,9 @@ Useful defaults or optional values:
 - `ASSISTANT_EMBEDDING_URL` is optional; if omitted, ingestion stores null embeddings and query-time retrieval degrades to metadata + FTS + trigram ranking
 - `ASSISTANT_EMBEDDING_TIMEOUT_MS` defaults to `3000` so slow query-time embedding calls degrade back to lexical retrieval
 - `ASSISTANT_EMBEDDING_MAX_QUERY_DISTANCE` defaults to `0.35` for cosine-distance filtering so nearest-neighbor results still need a minimum relevance bar
+- `ASSISTANT_ANSWER_URL` is optional but required for grounded Ask-mode answer generation
+- `ASSISTANT_ANSWER_MODEL` defaults to `gpt-4.1-mini`
+- `ASSISTANT_ANSWER_TIMEOUT_MS` defaults to `5000`
 - `ASSISTANT_WORKER_POLL_MS`, `ASSISTANT_JOB_MAX_ATTEMPTS`, `ASSISTANT_JOB_RETRY_BASE_MS`, and `ASSISTANT_JOB_STALE_LOCK_MS` control the PostgreSQL job worker
 
 ## Local Setup
@@ -122,6 +125,8 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 5. Preserve the session-driven actor handoff from route -> zod schema -> service -> ACL/db helpers so assistant retrieval never falls back to anonymous access
 6. Keep `auto` intent routing deterministic inside `server/rag/*`; Phase 1 should prefer explainable search behavior over speculative answer text
 7. Keep Phase 1 filters server-enforced inside `searchEntryKnowledge(...)`; the assistant shell now sends `department`, inclusive `date_range`, and `sort`, and transcript turns rely on `applied_filters` plus `total_results` coming back from the API
+8. Keep Ask-mode sufficiency gating deterministic and server-enforced before any answer-model call; weak or conflicting evidence must return an explainable abstention payload instead of unsupported prose
+9. Keep grounded answer generation behind the configured answer endpoint and constrain prompts to selected ACL-safe evidence only
 
 ### Change auth or role behavior
 
@@ -144,7 +149,7 @@ These scripts assume a VPS filesystem layout under `/srv/nerve`.
 
 - `server/db.ts` still owns the business-table bootstrap path, so keep new retrieval work in `server/rag/*` rather than growing it further.
 - Assistant embeddings are optional in Phase 1; if no embedding endpoint is configured, search still works through metadata-aware exact matching, trigram, and FTS.
-- Routed `ask` turns in Story 1.4 still return `answer: null`; grounded synthesis is intentionally deferred to the next story.
+- Routed `ask` turns now return grounded answers only when the server judges evidence sufficient; otherwise the API returns an abstention or fallback payload without calling the answer model.
 - The retained Supabase schema diverges from the active API role model.
 
 ## Recommended Checks Before Merging Backend Work

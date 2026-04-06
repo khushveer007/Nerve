@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { buildAssistantActorContext } from "./acl.js";
 import {
   assistantQueryEnvelopeSchema,
+  assistantQueryResultEnvelopeSchema,
   assistantSourceOpenEnvelopeSchema,
   assistantSourcePreviewEnvelopeSchema,
 } from "./schemas.js";
@@ -46,7 +47,8 @@ export function createAssistantRouter() {
 
     const actor = buildAssistantActorContext(res.locals.currentUser);
     const result = await executeAssistantQuery(actor, parsed.data.query);
-    return res.json({ result });
+    const contract = assistantQueryResultEnvelopeSchema.parse({ result });
+    return res.json(contract);
   }));
 
   router.post("/source-preview", asyncHandler(async (req, res) => {

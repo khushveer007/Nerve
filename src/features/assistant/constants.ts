@@ -13,12 +13,12 @@ export const ASSISTANT_MODE_OPTIONS: Array<{
   {
     value: 'search',
     label: 'Search',
-    description: 'Focus on retrieving source material before answer generation is added.',
+    description: 'Focus on retrieving source material without synthesis.',
   },
   {
     value: 'ask',
     label: 'Ask',
-    description: 'Use the answer-first path once grounded responses are connected.',
+    description: 'Use the answer-first path for grounded responses from cited evidence.',
   },
 ]
 
@@ -73,7 +73,7 @@ export function getAssistantAnnouncement(state: AssistantVisibleState): string {
     case 'info':
       return state.title
     case 'no_answer':
-      return 'No accessible entry-backed matches were found for the current request.'
+      return state.title
     case 'error':
       return 'Assistant status changed. An error interrupted the current request.'
     case 'unavailable':

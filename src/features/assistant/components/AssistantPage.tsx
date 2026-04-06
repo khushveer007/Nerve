@@ -57,20 +57,24 @@ function createMessageId() {
 }
 
 function buildAssistantSummary(result: AssistantQueryResult, requestedMode: AssistantMode) {
-  if (result.total_results === 0) {
-    if (requestedMode === 'auto' && result.mode === 'ask') {
-      return 'Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled and no accessible entry-backed matches were found yet.'
-    }
+  const autoAskPrefix = requestedMode === 'auto' && result.mode === 'ask'
+    ? 'Auto mode routed this turn through Ask. '
+    : ''
 
-    return 'No accessible entry-backed matches were found for this request yet.'
+  if (result.mode === 'ask' && result.grounded && result.answer) {
+    return `${autoAskPrefix}Answer based on ${result.citations.length} cited source${result.citations.length === 1 ? '' : 's'}.`
   }
 
-  if (requestedMode === 'auto' && result.mode === 'ask') {
-    return `Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled, so I found ${result.total_results} evidence-backed entry result${result.total_results === 1 ? '' : 's'} instead.`
+  if (result.mode === 'ask' && !result.enough_evidence && result.total_results > 0) {
+    return `${autoAskPrefix}I found related entry evidence, but not enough consistent support in the sources available to answer confidently.`
+  }
+
+  if (result.total_results === 0) {
+    return `${autoAskPrefix}No accessible entry-backed matches were found for this request.`
   }
 
   if (result.mode === 'ask') {
-    return `Grounded answer synthesis is still not enabled, but I found ${result.total_results} entry-backed result${result.total_results === 1 ? '' : 's'} for this request.`
+    return `${autoAskPrefix}I found supporting entry evidence, but I am holding the response to what the server could ground safely.`
   }
 
   return `I found ${result.total_results} entry-backed result${result.total_results === 1 ? '' : 's'} from the indexed Phase 1 corpus.`
@@ -108,6 +112,7 @@ export default function AssistantPage() {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [pendingConversationId, setPendingConversationId] = useState<number | null>(null)
+  const [pendingMode, setPendingMode] = useState<AssistantMode | null>(null)
   const [selectedPreview, setSelectedPreview] = useState<AssistantEntryResult | null>(null)
   const [selectedPreviewPayload, setSelectedPreviewPayload] = useState<AssistantSourcePreviewPayload | null>(null)
   const [sourceActionError, setSourceActionError] = useState<null | {
@@ -152,11 +157,21 @@ export default function AssistantPage() {
     }
 
     if (isSubmitting) {
+      const isAskGeneration = pendingMode === 'ask'
+
       return {
         kind: 'loading',
-        stage: 'retrieving',
-        title: 'Searching the indexed entry corpus.',
-        description: 'The assistant is retrieving entry-backed matches from the Phase 1 knowledge layer.',
+        stage: isAskGeneration ? 'generating' : 'retrieving',
+        title: pendingMode === 'auto'
+          ? 'Routing the question and gathering evidence.'
+          : isAskGeneration
+            ? 'Generating a grounded answer.'
+            : 'Searching the indexed entry corpus.',
+        description: pendingMode === 'auto'
+          ? 'The assistant is choosing the right search or answer path and checking the matching entry evidence.'
+          : isAskGeneration
+            ? 'The assistant is checking evidence sufficiency and composing a citation-backed answer.'
+            : 'The assistant is retrieving entry-backed matches from the Phase 1 knowledge layer.',
       }
     }
 
@@ -181,6 +196,23 @@ export default function AssistantPage() {
       }
     }
 
+    if (
+      lastAssistantMessage?.result
+      && lastAssistantMessage.result.mode === 'ask'
+      && !lastAssistantMessage.result.grounded
+      && !lastAssistantMessage.result.enough_evidence
+    ) {
+      return {
+        kind: 'no_answer',
+        title: lastAssistantMessage.result.results.length === 0
+          ? 'No accessible entry-backed matches were found.'
+          : 'Not enough consistent evidence was found.',
+        description: lastAssistantMessage.result.results.length === 0
+          ? 'Retry the same query or refine it with a title phrase, department name, or date range.'
+          : 'The assistant found related sources, but not enough consistent evidence in the sources available to answer confidently.',
+      }
+    }
+
     if (lastAssistantMessage?.result && lastAssistantMessage.result.results.length === 0) {
       return {
         kind: 'no_answer',
@@ -190,7 +222,7 @@ export default function AssistantPage() {
     }
 
     return { kind: 'result' }
-  }, [availability, hasTranscript, isChecking, isSubmitting, lastAssistantMessage, showUnavailable])
+  }, [availability, hasTranscript, isChecking, isSubmitting, lastAssistantMessage, pendingMode, showUnavailable])
 
   function focusComposer() {
     composerRef.current?.focus()
@@ -320,6 +352,7 @@ export default function AssistantPage() {
     setMessages((current) => [...current, userMessage])
     setDraft('')
     setPendingConversationId(conversationId)
+    setPendingMode(effectiveMode)
     invalidateSourceActions()
     focusComposer()
 
@@ -392,6 +425,7 @@ export default function AssistantPage() {
     } finally {
       if (conversationIdRef.current === conversationId) {
         setPendingConversationId(null)
+        setPendingMode(null)
       }
     }
   }
@@ -399,6 +433,7 @@ export default function AssistantPage() {
   function handleNewConversation() {
     conversationIdRef.current += 1
     setPendingConversationId(null)
+    setPendingMode(null)
     invalidateSourceActions()
     queryMutation.reset()
     previewMutation.reset()

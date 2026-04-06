@@ -114,7 +114,7 @@ export interface AssistantCitation {
 
 export interface AssistantQueryResult {
   mode: AssistantResolvedMode;
-  answer: null;
+  answer: string | null;
   enough_evidence: boolean;
   grounded: boolean;
   citations: AssistantCitation[];

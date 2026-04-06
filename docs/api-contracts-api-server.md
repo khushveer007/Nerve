@@ -136,7 +136,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 ### `POST /api/assistant/query`
 
-- **Purpose:** Execute the routed Phase 1 assistant query path over entry-backed `knowledge_*` records.
+- **Purpose:** Execute the routed Phase 1 assistant query path over entry-backed `knowledge_*` records, including grounded Ask-mode answers when evidence is sufficient.
 - **Auth:** Any authenticated user.
 - **Authorization Notes:** Retrieval is request-scoped and ACL-aware. The assistant evaluates the current session user, role, team, asset ownership, `visibility_scope`, and `knowledge_acl_principals` before it shapes snippets, citations, counts, or actions.
 - **Request Body:**
@@ -163,11 +163,31 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 ```json
 {
   "result": {
-    "mode": "search",
-    "answer": null,
+    "mode": "ask",
+    "answer": "The medical college has NABH accreditation for patient care, infrastructure, and clinical outcomes. [S1]",
     "enough_evidence": true,
-    "grounded": false,
-    "citations": [],
+    "grounded": true,
+    "citations": [
+      {
+        "label": "S1",
+        "asset_id": "asset_123",
+        "title": "Medical College Gets NABH Accreditation",
+        "source_kind": "entry",
+        "snippet": "Parul Institute of Medical Sciences and Research has been granted NABH accreditation...",
+        "citation_locator": {
+          "asset_id": "asset_123",
+          "asset_version_id": "assetver_123",
+          "chunk_id": "chunk_123",
+          "title": "Medical College Gets NABH Accreditation",
+          "source_kind": "entry",
+          "page_from": null,
+          "page_to": null,
+          "heading_path": ["Entry overview"],
+          "char_start": 0,
+          "char_end": 180
+        }
+      }
+    ],
     "applied_filters": {
       "department": "Medical",
       "date_range": {
@@ -204,7 +224,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
       }
     ],
     "follow_up_suggestions": [
-      "Refine the query with a department or title phrase."
+      "Open a supporting source below if you want to verify the cited entry evidence."
     ],
     "request_id": "req_123"
   }
@@ -213,12 +233,16 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 - **Notes:**
   - `result.mode` is the resolved server mode. Explicit `search` and `ask` selections stay authoritative, while `auto` is routed deterministically to `search` or `ask`.
-  - Story 1.4 still keeps `answer` as `null` and `grounded` as `false`; routed `ask` turns stay evidence-led until grounded synthesis lands in a later story.
+  - `grounded = true` means the server judged the retrieved evidence sufficient and the returned `answer` was generated only from authorized evidence.
+  - `grounded = false` with `enough_evidence = false` means the server abstained. The response still returns a valid `{ result }` payload with follow-up suggestions and any authorized supporting results.
+  - `grounded = false` with `enough_evidence = true` means supporting evidence existed but grounded answer generation was unavailable, so the client should render a fallback rather than fabricated prose.
   - Results are limited to `source_kind = "entry"` in this Phase 1 slice.
   - Phase 1 filters are `department`, inclusive `date_range.start` / `date_range.end`, and `sort` (`relevance` or `newest`).
   - `result.applied_filters` snapshots the normalized filters for that submitted turn so transcript history stays stable if the current session filters change later.
   - `result.total_results` reports the server-side match count before the response result array is truncated by `ASSISTANT_QUERY_RESULT_LIMIT`.
   - Retrieval uses an ACL-safe hybrid pipeline across metadata-aware exact matching, PostgreSQL full-text search, trigram similarity, and vector similarity when query embeddings are configured.
+  - Ask-mode answer generation uses the configured Azure AI Foundry / OpenAI-compatible answer endpoint with `ASSISTANT_ANSWER_MODEL` defaulting to `gpt-4.1-mini`.
+  - Ask-mode narrative generation is gated server-side. If evidence is weak or conflicting, the backend abstains before any answer-model call.
   - If `ASSISTANT_EMBEDDING_URL` is not configured, the route degrades safely to metadata + FTS + trigram retrieval without changing the response shape.
   - Unauthorized assets are excluded before snippets, citations, and follow-up guidance are assembled.
   - Blocked sources do not appear as disabled cards, teaser actions, hidden counts, or partial metadata.

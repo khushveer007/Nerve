@@ -37,7 +37,7 @@ const assistantDateSchema = z.preprocess(
     .nullable(),
 );
 
-const assistantQueryFiltersSchema = z.object({
+export const assistantQueryFiltersSchema = z.object({
   department: z.preprocess(
     (value) => {
       if (typeof value !== "string") {
@@ -80,6 +80,109 @@ const assistantSourceReferenceSchema = z.object({
   chunk_id: z.string().min(1),
   entry_id: z.string().min(1),
   source_kind: z.literal("entry"),
+}).strict();
+
+const citationLocatorSchema = z.object({
+  asset_id: z.string().min(1),
+  asset_version_id: z.string().min(1),
+  chunk_id: z.string().min(1),
+  title: z.string().min(1),
+  source_kind: z.literal("entry"),
+  page_from: z.number().int().nullable(),
+  page_to: z.number().int().nullable(),
+  heading_path: z.array(z.string()),
+  char_start: z.number().int().min(0),
+  char_end: z.number().int().min(0),
+}).strict();
+
+const assistantResultActionAvailabilitySchema = z.object({
+  available: z.boolean(),
+}).strict();
+
+const assistantResultActionsSchema = z.object({
+  preview: assistantResultActionAvailabilitySchema,
+  open_source: assistantResultActionAvailabilitySchema,
+}).strict();
+
+const assistantEntryMetadataSchema = z.object({
+  source_kind: z.literal("entry"),
+  entry_id: z.string().min(1),
+  dept: z.string().min(1),
+  type: z.string().min(1),
+  tags: z.array(z.string()),
+  entry_date: z.string().min(1),
+  academic_year: z.string(),
+  author_name: z.string(),
+  created_by: z.string().nullable(),
+  priority: z.string().min(1),
+  student_count: z.number().int().nullable(),
+  external_link: z.string(),
+  collaborating_org: z.string(),
+}).strict();
+
+const assistantEntryResultSchema = z.object({
+  asset_id: z.string().min(1),
+  asset_version_id: z.string().min(1),
+  chunk_id: z.string().min(1),
+  entry_id: z.string().min(1),
+  title: z.string().min(1),
+  source_kind: z.literal("entry"),
+  media_type: z.literal("text"),
+  snippet: z.string().min(1),
+  score: z.number(),
+  metadata: assistantEntryMetadataSchema,
+  citation_locator: citationLocatorSchema,
+  actions: assistantResultActionsSchema,
+}).strict();
+
+const assistantCitationSchema = z.object({
+  label: z.string().regex(/^S\d+$/),
+  asset_id: z.string().min(1),
+  title: z.string().min(1),
+  source_kind: z.literal("entry"),
+  snippet: z.string().min(1),
+  citation_locator: citationLocatorSchema,
+}).strict();
+
+export const assistantQueryResultSchema = z.object({
+  mode: z.enum(["search", "ask"]),
+  answer: z.string().min(1).nullable(),
+  enough_evidence: z.boolean(),
+  grounded: z.boolean(),
+  citations: z.array(assistantCitationSchema),
+  applied_filters: assistantQueryFiltersSchema,
+  total_results: z.number().int().min(0),
+  results: z.array(assistantEntryResultSchema),
+  follow_up_suggestions: z.array(z.string().min(1)),
+  request_id: z.string().uuid(),
+}).superRefine((value, ctx) => {
+  if (value.grounded && value.answer === null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Grounded answers must include answer text.",
+      path: ["answer"],
+    });
+  }
+
+  if (value.grounded && value.citations.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Grounded answers must include citations.",
+      path: ["citations"],
+    });
+  }
+
+  if (value.grounded && !value.enough_evidence) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Grounded answers must report enough evidence.",
+      path: ["enough_evidence"],
+    });
+  }
+});
+
+export const assistantQueryResultEnvelopeSchema = z.object({
+  result: assistantQueryResultSchema,
 }).strict();
 
 export const assistantSourcePreviewEnvelopeSchema = z.object({

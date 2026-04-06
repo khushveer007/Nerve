@@ -79,6 +79,23 @@ export const config = {
       timeoutMs: getNumberEnv("ASSISTANT_EMBEDDING_TIMEOUT_MS", 3_000),
       maxQueryDistance: getNumberEnv("ASSISTANT_EMBEDDING_MAX_QUERY_DISTANCE", 0.35),
     },
+    answering: {
+      url: optionalEnv("ASSISTANT_ANSWER_URL"),
+      apiKey: optionalEnv("ASSISTANT_ANSWER_API_KEY"),
+      authHeader: optionalEnv("ASSISTANT_ANSWER_API_HEADER")
+        || (optionalEnv("ASSISTANT_ANSWER_API_KEY") ? "Authorization" : ""),
+      authScheme: optionalEnv("ASSISTANT_ANSWER_AUTH_SCHEME")
+        || (
+          (
+            optionalEnv("ASSISTANT_ANSWER_API_HEADER")
+            || (optionalEnv("ASSISTANT_ANSWER_API_KEY") ? "Authorization" : "")
+          ) === "Authorization"
+            ? "Bearer"
+            : ""
+        ),
+      model: optionalEnv("ASSISTANT_ANSWER_MODEL") || "gpt-4.1-mini",
+      timeoutMs: getNumberEnv("ASSISTANT_ANSWER_TIMEOUT_MS", 5_000),
+    },
     worker: {
       pollIntervalMs: getNumberEnv("ASSISTANT_WORKER_POLL_MS", 1_000),
       maxAttempts: getNumberEnv("ASSISTANT_JOB_MAX_ATTEMPTS", 3),

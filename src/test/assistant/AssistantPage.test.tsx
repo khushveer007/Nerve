@@ -109,8 +109,54 @@ function buildAssistantQueryResponse() {
 }
 
 function buildAutoAskQueryResponse() {
+  const payload = buildGroundedAskQueryResponse()
+  payload.result.mode = 'ask'
+  return payload
+}
+
+function buildGroundedAskQueryResponse() {
   const payload = buildAssistantQueryResponse()
   payload.result.mode = 'ask'
+  payload.result.answer = 'The Design Department partnered with Adobe to give 200 design students access to the full Creative Suite for their academic tenure. [S1]'
+  payload.result.grounded = true
+  payload.result.enough_evidence = true
+  payload.result.citations = [
+    {
+      label: 'S1',
+      asset_id: 'asset_1',
+      title: 'Design Department Partners with Adobe for Creative Suite',
+      source_kind: 'entry',
+      snippet: 'Parul University has partnered with Adobe to provide Creative Suite access.',
+      citation_locator: {
+        asset_id: 'asset_1',
+        asset_version_id: 'asset_ver_1',
+        chunk_id: 'chunk_1',
+        title: 'Design Department Partners with Adobe for Creative Suite',
+        source_kind: 'entry',
+        page_from: null,
+        page_to: null,
+        heading_path: ['Entry overview'],
+        char_start: 0,
+        char_end: 120,
+      },
+    },
+  ]
+  payload.result.follow_up_suggestions = [
+    'Open a supporting source below if you want to verify the cited entry evidence.',
+  ]
+  return payload
+}
+
+function buildLowConfidenceAskQueryResponse() {
+  const payload = buildAssistantQueryResponse()
+  payload.result.mode = 'ask'
+  payload.result.answer = null
+  payload.result.grounded = false
+  payload.result.enough_evidence = false
+  payload.result.follow_up_suggestions = [
+    'Try asking about a single entry title or a narrower date range.',
+    'Open a supporting source below to inspect the evidence that was retrieved.',
+  ]
   return payload
 }
 
@@ -624,6 +670,58 @@ describe('AIQueryPage', () => {
     expect(screen.getAllByText('Adobe Inc.').length).toBeGreaterThan(0)
   })
 
+  it('renders grounded ask answers with inline citation chips and supporting evidence', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => buildGroundedAskQueryResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Explain the Adobe partnership.' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText(/grounded answer/i)).toBeInTheDocument()
+    expect(screen.getByText(/give 200 design students access to the full creative suite/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Citation S1: Design Department Partners with Adobe for Creative Suite')).toBeInTheDocument()
+    expect(screen.getByText('Supporting sources')).toBeInTheDocument()
+    expect(screen.getByText('Design Department Partners with Adobe for Creative Suite')).toBeInTheDocument()
+  })
+
   it('surfaces safe error copy when a source preview is denied', async () => {
     vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
 
@@ -983,7 +1081,7 @@ describe('AIQueryPage', () => {
     expect(screen.queryByText(/assistant search and answer services are unavailable/i)).not.toBeInTheDocument()
   })
 
-  it('makes routed auto-to-ask turns explicit when answer synthesis is not available yet', async () => {
+  it('makes routed auto-to-ask grounded answers explicit', async () => {
     vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1027,7 +1125,67 @@ describe('AIQueryPage', () => {
     fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
 
     expect(await screen.findByText(/auto mode routed this turn through ask/i)).toBeInTheDocument()
-    expect(screen.getByText(/grounded answer synthesis is still not enabled/i)).toBeInTheDocument()
+    expect(screen.getByText(/grounded answer/i)).toBeInTheDocument()
+    expect(screen.getByText(/full creative suite/i)).toBeInTheDocument()
+  })
+
+  it('keeps auto-mode loading copy neutral until routing resolves', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const deferredQuery = createDeferred<ReturnType<typeof buildAssistantQueryResponse>>()
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => deferredQuery.promise,
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Adobe Creative Suite' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Retrieving matching entries.')
+    })
+    expect(screen.getByText('Routing the question and gathering evidence.')).toBeInTheDocument()
+    expect(screen.queryByText('Generating a grounded answer.')).not.toBeInTheDocument()
+
+    await act(async () => {
+      deferredQuery.resolve(buildAssistantQueryResponse())
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByText(/design department partners with adobe/i)).toBeInTheDocument()
   })
 
   it('shows neutral no-results guidance with one-click retry and edit actions', async () => {
@@ -1086,6 +1244,57 @@ describe('AIQueryPage', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
+  })
+
+  it('distinguishes low-confidence ask results from zero-result no-answer states', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => buildLowConfidenceAskQueryResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Explain the Adobe partnership in detail.' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText(/not enough consistent evidence/i)).toBeInTheDocument()
+    expect(screen.getByText(/sources available to you/i)).toBeInTheDocument()
+    expect(screen.getByText('Supporting sources')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument()
   })
 })
 
