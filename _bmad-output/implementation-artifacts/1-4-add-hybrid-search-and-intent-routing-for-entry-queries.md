@@ -1,6 +1,6 @@
 # Story 1.4: Add Hybrid Search and Intent Routing for Entry Queries
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -52,6 +52,12 @@ so that I can quickly find the right entry without leaving the assistant workflo
   - [x] Extend `server/test/rag/rag.integration.test.ts` with cases covering exact-title queries, semantically similar queries, ACL-safe hybrid ranking, deterministic auto routing, and zero-result refinement suggestions.
   - [x] Add assistant UI tests for routed-mode messaging, neutral no-results copy, and retry/refinement behavior without retyping the original query.
   - [x] Update API and developer docs that currently describe Phase 1 query behavior as only search-first fallback so they reflect routed-mode semantics and query-time hybrid retrieval.
+
+### Review Findings
+
+- [x] [Review][Patch] Vector retrieval has no relevance floor, so embedding-enabled environments can return unrelated nearest-neighbor entries instead of the required neutral no-results state. [`server/rag/db.ts:843`](/home/opsa/Work/Nerve/server/rag/db.ts#L843)
+- [x] [Review][Patch] Auto routing checks known-item cues before synthesis phrasing, so prompts like `Summarize the ... policy memo.` resolve to `search` instead of the intended routed `ask` behavior. [`server/rag/intent.ts:80`](/home/opsa/Work/Nerve/server/rag/intent.ts#L80)
+- [x] [Review][Patch] Query-time embedding requests have no timeout or abort path, so a slow or hanging embedding provider can block the whole assistant query instead of degrading safely to lexical retrieval. [`server/rag/embeddings.ts:21`](/home/opsa/Work/Nerve/server/rag/embeddings.ts#L21)
 
 ## Dev Notes
 

@@ -702,6 +702,7 @@ export async function searchEntryKnowledge(options: {
   actor: AssistantActorContext;
   queryText: string;
   queryEmbedding?: string | null;
+  queryEmbeddingMaxDistance?: number;
   filters: AssistantQueryFilters;
   limit: number;
 }) {
@@ -856,6 +857,7 @@ export async function searchEntryKnowledge(options: {
       FROM accessible_chunks
       WHERE $2::vector IS NOT NULL
         AND embedding IS NOT NULL
+        AND (embedding <=> $2::vector) <= $12
     ),
     fused_candidates AS (
       SELECT
@@ -972,7 +974,7 @@ export async function searchEntryKnowledge(options: {
     FROM top_per_asset
     WHERE asset_rank = 1
     ORDER BY score DESC, title ASC
-    LIMIT $12`,
+    LIMIT $13`,
     [
       options.queryText,
       options.queryEmbedding ?? null,
@@ -982,6 +984,7 @@ export async function searchEntryKnowledge(options: {
       options.filters.tags,
       ...accessClause.params,
       candidateLimit,
+      options.queryEmbeddingMaxDistance ?? null,
       options.limit,
     ],
   );

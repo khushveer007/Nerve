@@ -73,9 +73,11 @@ export const config = {
           ) === "Authorization"
             ? "Bearer"
             : ""
-        ),
+      ),
       model: optionalEnv("ASSISTANT_EMBEDDING_MODEL") || "text-embedding-3-small",
       dimensions: assistantEmbeddingDimensions,
+      timeoutMs: getNumberEnv("ASSISTANT_EMBEDDING_TIMEOUT_MS", 3_000),
+      maxQueryDistance: getNumberEnv("ASSISTANT_EMBEDDING_MAX_QUERY_DISTANCE", 0.35),
     },
     worker: {
       pollIntervalMs: getNumberEnv("ASSISTANT_WORKER_POLL_MS", 1_000),

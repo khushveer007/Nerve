@@ -23,15 +23,32 @@ async function requestEmbeddings(texts: string[]) {
     return texts.map(() => null);
   }
 
-  const response = await fetch(config.assistant.embeddings.url, {
-    method: "POST",
-    headers: buildEmbeddingHeaders(),
-    body: JSON.stringify({
-      model: config.assistant.embeddings.model,
-      input: texts,
-      dimensions: config.assistant.embeddings.dimensions,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, config.assistant.embeddings.timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(config.assistant.embeddings.url, {
+      method: "POST",
+      headers: buildEmbeddingHeaders(),
+      body: JSON.stringify({
+        model: config.assistant.embeddings.model,
+        input: texts,
+        dimensions: config.assistant.embeddings.dimensions,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Embedding request timed out.");
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     throw new Error(`Embedding request failed with status ${response.status}.`);

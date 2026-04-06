@@ -77,10 +77,10 @@ function resolveAutoMode(text: string): AssistantIntentResolution {
     || query.trim().endsWith("?");
   const knownItemCue = includesCue(query, KNOWN_ITEM_CUES);
 
-  if (explicitRetrieval || knownItemCue) {
+  if (explicitRetrieval) {
     return {
       mode: "search",
-      reason: "The request contains direct retrieval phrasing or known-item cues.",
+      reason: "The request contains direct retrieval phrasing.",
     };
   }
 
@@ -88,6 +88,13 @@ function resolveAutoMode(text: string): AssistantIntentResolution {
     return {
       mode: "ask",
       reason: "The request asks for explanation, synthesis, or comparison.",
+    };
+  }
+
+  if (knownItemCue) {
+    return {
+      mode: "search",
+      reason: "The request contains known-item cues.",
     };
   }
 

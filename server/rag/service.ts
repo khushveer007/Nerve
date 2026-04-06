@@ -90,6 +90,7 @@ export async function executeAssistantQuery(
     actor,
     queryText: input.text,
     queryEmbedding,
+    queryEmbeddingMaxDistance: config.assistant.embeddings.maxQueryDistance,
     filters: input.filters,
     limit: config.assistant.queryResultLimit,
   });

@@ -978,7 +978,7 @@ describe("Story 1.2 RAG backend", () => {
     });
 
     expect(result.results[0]?.title).toBe("Project Aurora");
-    expect(result.results.some((item) => item.title === "Project Orchard")).toBe(true);
+    expect(result.results).toHaveLength(1);
   });
 
   it("falls back to lexical hybrid retrieval when query-time embeddings are unavailable", async () => {
@@ -1100,6 +1100,93 @@ describe("Story 1.2 RAG backend", () => {
         expect.stringMatching(/phase 1/i),
       ]),
     );
+  });
+
+  it("preserves no-results behavior when embeddings are enabled but the nearest chunk is not relevant enough", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
+      ASSISTANT_EMBEDDING_MAX_QUERY_DISTANCE: "0.2",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const remoteEntry = await createIndexedEntry(runtime, {
+      title: "Project Orchard",
+      dept: "Medical",
+      type: "Notice",
+      body: "Pebble harbor mint lantern.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "ca-001",
+      tags: ["orchard"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await setAssetEmbedding(runtime, remoteEntry.asset.id, buildEmbedding(1));
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ embedding: buildEmbedding(0) }],
+      }),
+    } as Response);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "auto",
+      text: "Summarize the starlight orchard policy memo.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("ask");
+    expect(result.results).toHaveLength(0);
+  });
+
+  it("degrades to lexical retrieval when the embedding provider times out", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
+      ASSISTANT_EMBEDDING_TIMEOUT_MS: "5",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    vi.useFakeTimers();
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => (
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => {
+          const abortError = new Error("The operation was aborted.");
+          abortError.name = "AbortError";
+          reject(abortError);
+        }, { once: true });
+      })
+    ));
+
+    try {
+      const resultPromise = runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+        mode: "search",
+        text: "Adobe Creative Suite",
+        filters: EMPTY_FILTERS,
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      const result = await resultPromise;
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.results[0]?.title).toContain("Adobe");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the assistant disabled path out of startup indexing and query execution", async () => {

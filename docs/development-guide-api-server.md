@@ -31,6 +31,8 @@ Useful defaults or optional values:
 - `ASSISTANT_RAG_ENABLED` defaults to `true`
 - `ASSISTANT_QUERY_RESULT_LIMIT` defaults to `5`
 - `ASSISTANT_EMBEDDING_URL` is optional; if omitted, ingestion stores null embeddings and query-time retrieval degrades to metadata + FTS + trigram ranking
+- `ASSISTANT_EMBEDDING_TIMEOUT_MS` defaults to `3000` so slow query-time embedding calls degrade back to lexical retrieval
+- `ASSISTANT_EMBEDDING_MAX_QUERY_DISTANCE` defaults to `0.35` for cosine-distance filtering so nearest-neighbor results still need a minimum relevance bar
 - `ASSISTANT_WORKER_POLL_MS`, `ASSISTANT_JOB_MAX_ATTEMPTS`, `ASSISTANT_JOB_RETRY_BASE_MS`, and `ASSISTANT_JOB_STALE_LOCK_MS` control the PostgreSQL job worker
 
 ## Local Setup
