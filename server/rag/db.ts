@@ -8,6 +8,7 @@ import { buildKnowledgeAssetAccessClause } from "./acl.js";
 import type {
   AssistantActorContext,
   AssistantEntrySearchResult,
+  AssistantEntrySearchResponse,
   AssistantHealthSnapshot,
   AssistantQueryFilters,
   AssistantSourceReference,
@@ -111,6 +112,18 @@ function buildChunkMetadataText(metadata: Record<string, unknown>) {
     .map((value) => String(value).trim())
     .filter(Boolean)
     .join(" ");
+}
+
+function buildSafeMetadataEntryDateSql(metadataExpression: string) {
+  return `CASE
+    WHEN (${metadataExpression} ->> 'entry_date') ~ '^\\d{4}-\\d{2}-\\d{2}$'
+      AND to_char(
+        to_date(${metadataExpression} ->> 'entry_date', 'YYYY-MM-DD'),
+        'YYYY-MM-DD'
+      ) = (${metadataExpression} ->> 'entry_date')
+      THEN to_date(${metadataExpression} ->> 'entry_date', 'YYYY-MM-DD')
+    ELSE NULL
+  END`;
 }
 
 function buildMigrationTableSql() {
@@ -705,9 +718,10 @@ export async function searchEntryKnowledge(options: {
   queryEmbeddingMaxDistance?: number;
   filters: AssistantQueryFilters;
   limit: number;
-}) {
+}): Promise<AssistantEntrySearchResponse> {
   const accessClause = buildKnowledgeAssetAccessClause(options.actor, { startIndex: 7 });
   const candidateLimit = Math.max(options.limit * 8, 24);
+  const safeEntryDateSql = buildSafeMetadataEntryDateSql("ka.metadata");
   const result = await pool.query<{
     asset_id: string;
     asset_version_id: string;
@@ -716,10 +730,11 @@ export async function searchEntryKnowledge(options: {
     title: string;
     snippet: string;
     score: number;
+    total_count: number;
     metadata: EntryKnowledgeMetadata;
     citation_locator: CitationLocator;
   }>(
-    `WITH accessible_chunks AS (
+    `WITH accessible_base AS (
       SELECT
         ka.id AS asset_id,
         kav.id AS asset_version_id,
@@ -763,6 +778,7 @@ export async function searchEntryKnowledge(options: {
         kc.search_vector,
         kc.embedding,
         kc.content,
+        ${safeEntryDateSql} AS authoritative_entry_date,
         ka.metadata,
         kc.citation_locator
       FROM knowledge_chunks kc
@@ -775,21 +791,20 @@ export async function searchEntryKnowledge(options: {
         AND ka.status = 'ready'
         AND kav.extraction_status = 'ready'
         AND kav.superseded_at IS NULL
+    ),
+    accessible_chunks AS (
+      SELECT *
+      FROM accessible_base
+      WHERE (
+        $3::text IS NULL OR (metadata ->> 'dept') = $3::text
+      )
         AND (
-          cardinality($3::text[]) = 0 OR (ka.metadata ->> 'dept') = ANY($3::text[])
+          $4::date IS NULL
+          OR (authoritative_entry_date IS NOT NULL AND authoritative_entry_date >= $4::date)
         )
         AND (
-          cardinality($4::text[]) = 0 OR (ka.metadata ->> 'type') = ANY($4::text[])
-        )
-        AND (
-          cardinality($5::text[]) = 0 OR (ka.metadata ->> 'priority') = ANY($5::text[])
-        )
-        AND (
-          cardinality($6::text[]) = 0 OR EXISTS (
-            SELECT 1
-              FROM jsonb_array_elements_text(ka.metadata -> 'tags') AS tag(value)
-             WHERE tag.value = ANY($6::text[])
-          )
+          $5::date IS NULL
+          OR (authoritative_entry_date IS NOT NULL AND authoritative_entry_date <= $5::date)
         )
     ),
     metadata_candidates AS (
@@ -801,6 +816,7 @@ export async function searchEntryKnowledge(options: {
         title,
         snippet,
         metadata,
+        authoritative_entry_date,
         citation_locator,
         ROW_NUMBER() OVER (
           ORDER BY exact_strength DESC, similarity(title, $1) DESC, chunk_no ASC, asset_id ASC
@@ -817,6 +833,7 @@ export async function searchEntryKnowledge(options: {
         title,
         snippet,
         metadata,
+        authoritative_entry_date,
         citation_locator,
         ROW_NUMBER() OVER (
           ORDER BY ts_rank_cd(search_vector, plainto_tsquery('english', $1)) DESC, chunk_no ASC, asset_id ASC
@@ -833,6 +850,7 @@ export async function searchEntryKnowledge(options: {
         title,
         snippet,
         metadata,
+        authoritative_entry_date,
         citation_locator,
         ROW_NUMBER() OVER (
           ORDER BY GREATEST(similarity(title, $1), similarity(content, $1)) DESC, chunk_no ASC, asset_id ASC
@@ -850,6 +868,7 @@ export async function searchEntryKnowledge(options: {
         title,
         snippet,
         metadata,
+        authoritative_entry_date,
         citation_locator,
         ROW_NUMBER() OVER (
           ORDER BY embedding <=> $2::vector ASC, chunk_no ASC, asset_id ASC
@@ -858,6 +877,18 @@ export async function searchEntryKnowledge(options: {
       WHERE $2::vector IS NOT NULL
         AND embedding IS NOT NULL
         AND (embedding <=> $2::vector) <= $12
+    ),
+    matched_assets AS (
+      SELECT DISTINCT asset_id
+      FROM (
+        SELECT asset_id FROM metadata_candidates
+        UNION
+        SELECT asset_id FROM fts_candidates
+        UNION
+        SELECT asset_id FROM trigram_candidates
+        UNION
+        SELECT asset_id FROM vector_candidates
+      ) matched
     ),
     fused_candidates AS (
       SELECT
@@ -868,6 +899,7 @@ export async function searchEntryKnowledge(options: {
         title,
         snippet,
         metadata,
+        authoritative_entry_date,
         citation_locator,
         MAX(exact_signal) AS exact_signal,
         SUM(rrf_score) AS score
@@ -880,11 +912,12 @@ export async function searchEntryKnowledge(options: {
           title,
           snippet,
           metadata,
+          authoritative_entry_date,
           citation_locator,
           1 AS exact_signal,
           1.0 / (50 + candidate_rank) AS rrf_score
         FROM metadata_candidates
-        WHERE candidate_rank <= $11
+        WHERE $6::text = 'newest' OR candidate_rank <= $11
 
         UNION ALL
 
@@ -896,11 +929,12 @@ export async function searchEntryKnowledge(options: {
           title,
           snippet,
           metadata,
+          authoritative_entry_date,
           citation_locator,
           0 AS exact_signal,
           1.0 / (50 + candidate_rank) AS rrf_score
         FROM fts_candidates
-        WHERE candidate_rank <= $11
+        WHERE $6::text = 'newest' OR candidate_rank <= $11
 
         UNION ALL
 
@@ -912,11 +946,12 @@ export async function searchEntryKnowledge(options: {
           title,
           snippet,
           metadata,
+          authoritative_entry_date,
           citation_locator,
           0 AS exact_signal,
           1.0 / (50 + candidate_rank) AS rrf_score
         FROM trigram_candidates
-        WHERE candidate_rank <= $11
+        WHERE $6::text = 'newest' OR candidate_rank <= $11
 
         UNION ALL
 
@@ -928,11 +963,12 @@ export async function searchEntryKnowledge(options: {
           title,
           snippet,
           metadata,
+          authoritative_entry_date,
           citation_locator,
           0 AS exact_signal,
           1.0 / (50 + candidate_rank) AS rrf_score
         FROM vector_candidates
-        WHERE candidate_rank <= $11
+        WHERE $6::text = 'newest' OR candidate_rank <= $11
       ) fused
       GROUP BY
         asset_id,
@@ -941,6 +977,7 @@ export async function searchEntryKnowledge(options: {
         entry_id,
         title,
         snippet,
+        authoritative_entry_date,
         metadata,
         citation_locator
     ),
@@ -953,6 +990,7 @@ export async function searchEntryKnowledge(options: {
         title,
         snippet,
         score + (exact_signal * 0.02) AS score,
+        authoritative_entry_date,
         metadata,
         citation_locator,
         ROW_NUMBER() OVER (
@@ -969,19 +1007,34 @@ export async function searchEntryKnowledge(options: {
       title,
       snippet,
       score,
+      (SELECT COUNT(*)::int FROM matched_assets) AS total_count,
       metadata,
       citation_locator
     FROM top_per_asset
     WHERE asset_rank = 1
-    ORDER BY score DESC, title ASC
+    ORDER BY
+      CASE
+        WHEN $6::text = 'newest' THEN authoritative_entry_date
+        ELSE NULL
+      END DESC NULLS LAST,
+      CASE
+        WHEN $6::text <> 'newest' THEN score
+        ELSE NULL
+      END DESC NULLS LAST,
+      CASE
+        WHEN $6::text = 'newest' THEN score
+        ELSE NULL
+      END DESC NULLS LAST,
+      title ASC,
+      chunk_id ASC
     LIMIT $13`,
     [
       options.queryText,
       options.queryEmbedding ?? null,
-      options.filters.departments,
-      options.filters.entry_types,
-      options.filters.priorities,
-      options.filters.tags,
+      options.filters.department,
+      options.filters.date_range.start,
+      options.filters.date_range.end,
+      options.filters.sort,
       ...accessClause.params,
       candidateLimit,
       options.queryEmbeddingMaxDistance ?? null,
@@ -989,7 +1042,10 @@ export async function searchEntryKnowledge(options: {
     ],
   );
 
-  return result.rows.map(mapSearchResult);
+  return {
+    results: result.rows.map(mapSearchResult),
+    totalCount: result.rows[0]?.total_count ?? 0,
+  };
 }
 
 export async function getAuthorizedAssistantEntrySource(options: {

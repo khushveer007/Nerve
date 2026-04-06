@@ -29,7 +29,7 @@ Useful defaults or optional values:
 - `COOKIE_SECURE` defaults to `false`
 - `SUPER_ADMIN_EMAIL` defaults to `super@parul.ac.in`
 - `ASSISTANT_RAG_ENABLED` defaults to `true`
-- `ASSISTANT_QUERY_RESULT_LIMIT` defaults to `5`
+- `ASSISTANT_QUERY_RESULT_LIMIT` defaults to `20`
 - `ASSISTANT_EMBEDDING_URL` is optional; if omitted, ingestion stores null embeddings and query-time retrieval degrades to metadata + FTS + trigram ranking
 - `ASSISTANT_EMBEDDING_TIMEOUT_MS` defaults to `3000` so slow query-time embedding calls degrade back to lexical retrieval
 - `ASSISTANT_EMBEDDING_MAX_QUERY_DISTANCE` defaults to `0.35` for cosine-distance filtering so nearest-neighbor results still need a minimum relevance bar
@@ -121,6 +121,7 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 4. Extend `server/test/rag/*` and the assistant client tests together so backend and shell behavior stay aligned
 5. Preserve the session-driven actor handoff from route -> zod schema -> service -> ACL/db helpers so assistant retrieval never falls back to anonymous access
 6. Keep `auto` intent routing deterministic inside `server/rag/*`; Phase 1 should prefer explainable search behavior over speculative answer text
+7. Keep Phase 1 filters server-enforced inside `searchEntryKnowledge(...)`; the assistant shell now sends `department`, inclusive `date_range`, and `sort`, and transcript turns rely on `applied_filters` plus `total_results` coming back from the API
 
 ### Change auth or role behavior
 

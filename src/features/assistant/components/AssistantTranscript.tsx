@@ -1,9 +1,12 @@
+import { useState } from 'react'
+
 import { ExternalLink, FileSearch, SearchX } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
+import { buildAssistantFilterChips } from '../filters'
 import type { AssistantEntryResult, AssistantMessage, AssistantMode } from '../types'
 
 interface AssistantTranscriptProps {
@@ -36,6 +39,8 @@ export default function AssistantTranscript({
   openSourcePendingId = null,
   previewSourcePendingId = null,
 }: AssistantTranscriptProps) {
+  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({})
+
   return (
     <Card className="border-border/70">
       <CardHeader className="pb-4">
@@ -79,7 +84,7 @@ export default function AssistantTranscript({
               <div className="space-y-4">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">{formatCountLabel(message.result.results.length)}</Badge>
+                    <Badge variant="secondary">{formatCountLabel(message.result.total_results)}</Badge>
                     {message.mode === 'auto' && message.result.mode === 'ask' && (
                       <Badge variant="outline">Routed to Ask</Badge>
                     )}
@@ -92,6 +97,18 @@ export default function AssistantTranscript({
                   </p>
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-background/80 p-3">
+                  <Badge variant="outline">{message.result.total_results} entry-backed results</Badge>
+                  {buildAssistantFilterChips(message.result.applied_filters).length === 0 && (
+                    <Badge variant="secondary">Filters: None</Badge>
+                  )}
+                  {buildAssistantFilterChips(message.result.applied_filters).map((chip) => (
+                    <Badge key={`${message.id}-${chip.key}`} variant="secondary">
+                      {chip.label}
+                    </Badge>
+                  ))}
+                </div>
+
                 {message.result.results.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
                     <div className="mb-2 flex items-center gap-2 text-foreground">
@@ -99,7 +116,7 @@ export default function AssistantTranscript({
                       <span className="font-medium">No accessible entry-backed matches</span>
                     </div>
                     <p className="leading-6">
-                      Retry this query or refine it with a title phrase, department name, or known tag from an existing entry.
+                      Retry this query or refine it with a title phrase, department name, or date range from an existing entry.
                     </p>
                     {message.result.follow_up_suggestions.length > 0 && (
                       <div className="mt-3 space-y-2">
@@ -133,7 +150,7 @@ export default function AssistantTranscript({
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {message.result.results.map((result) => {
+                    {(expandedMessages[message.id] ? message.result.results : message.result.results.slice(0, 5)).map((result) => {
                       const previewAvailable = result.actions?.preview.available ?? true
                       const openSourceAvailable = result.actions?.open_source.available ?? true
 
@@ -211,6 +228,20 @@ export default function AssistantTranscript({
                         </div>
                       </div>
                     )})}
+                    {message.result.results.length > 5 && !expandedMessages[message.id] && (
+                      <Button
+                        onClick={() => {
+                          setExpandedMessages((current) => ({
+                            ...current,
+                            [message.id]: true,
+                          }))
+                        }}
+                        type="button"
+                        variant="outline"
+                      >
+                        Show more results
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

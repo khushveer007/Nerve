@@ -2,12 +2,17 @@ export type AssistantMode = 'auto' | 'search' | 'ask'
 export type AssistantRole = 'user' | 'assistant'
 export type AssistantStatus = 'empty' | 'loading' | 'info' | 'result' | 'no_answer' | 'error' | 'unavailable'
 export type AssistantLoadingStage = 'checking' | 'retrieving' | 'generating'
+export type AssistantSort = 'relevance' | 'newest'
+
+export interface AssistantDateRangeFilter {
+  start: string | null
+  end: string | null
+}
 
 export interface AssistantQueryFilters {
-  departments: string[]
-  entry_types: string[]
-  priorities: string[]
-  tags: string[]
+  department: string | null
+  date_range: AssistantDateRangeFilter
+  sort: AssistantSort
 }
 
 export interface AssistantCitationLocator {
@@ -92,6 +97,8 @@ export interface AssistantQueryResult {
   enough_evidence: boolean
   grounded: boolean
   citations: AssistantCitation[]
+  applied_filters: AssistantQueryFilters
+  total_results: number
   results: AssistantEntryResult[]
   follow_up_suggestions: string[]
   request_id: string

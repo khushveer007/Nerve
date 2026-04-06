@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CreateEntryInput } from "../../db.js";
+import type { AssistantQueryFilters } from "../../rag/types.js";
 import {
   createTestRuntime,
   drainKnowledgeJobs,
@@ -9,11 +10,13 @@ import {
 } from "./test-utils.js";
 
 const cleanups: Array<() => Promise<void>> = [];
-const EMPTY_FILTERS = {
-  departments: [],
-  entry_types: [],
-  priorities: [],
-  tags: [],
+const EMPTY_FILTERS: AssistantQueryFilters = {
+  department: null,
+  date_range: {
+    start: null,
+    end: null,
+  },
+  sort: "relevance" as const,
 };
 
 afterEach(async () => {
@@ -210,16 +213,11 @@ describe("Story 1.2 RAG backend", () => {
     const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
       actor: SUPER_ADMIN_ACTOR,
       queryText: "Adobe Creative Suite",
-      filters: {
-        departments: [],
-        entry_types: [],
-        priorities: [],
-        tags: [],
-      },
+      filters: EMPTY_FILTERS,
       limit: 5,
     });
 
-    expect(searchResults[0]?.entry_id).toBe(entry!.id);
+    expect(searchResults.results[0]?.entry_id).toBe(entry!.id);
   });
 
   it("skips already-ready entries when startup backfill runs again", async () => {
@@ -289,17 +287,12 @@ describe("Story 1.2 RAG backend", () => {
     const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
       actor: SUPER_ADMIN_ACTOR,
       queryText: "Firefly training labs",
-      filters: {
-        departments: [],
-        entry_types: [],
-        priorities: [],
-        tags: [],
-      },
+      filters: EMPTY_FILTERS,
       limit: 5,
     });
 
-    expect(searchResults[0]?.title).toContain("Adobe");
-    expect(searchResults[0]?.snippet).toContain("Firefly training labs");
+    expect(searchResults.results[0]?.title).toContain("Adobe");
+    expect(searchResults.results[0]?.snippet).toContain("Firefly training labs");
   });
 
   it("keeps the current ready version searchable when a reindex attempt fails", async () => {
@@ -333,16 +326,11 @@ describe("Story 1.2 RAG backend", () => {
     const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
       actor: SUPER_ADMIN_ACTOR,
       queryText: "Adobe Creative Suite",
-      filters: {
-        departments: [],
-        entry_types: [],
-        priorities: [],
-        tags: [],
-      },
+      filters: EMPTY_FILTERS,
       limit: 5,
     });
 
-    expect(searchResults[0]?.entry_id).toBe(entry!.id);
+    expect(searchResults.results[0]?.entry_id).toBe(entry!.id);
   });
 
   it("retries failed jobs and moves them to dead_letter after the retry limit", async () => {
@@ -1102,6 +1090,214 @@ describe("Story 1.2 RAG backend", () => {
     );
   });
 
+  it("applies department and inclusive date-range filters before shaping assistant results", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    await createIndexedEntry(runtime, {
+      title: "Design Awards 2026",
+      dept: "Design",
+      type: "Achievement",
+      body: "Adobe-aligned design showcase for Phase 1 filtering.",
+      priority: "Normal",
+      entry_date: "2026-01-10",
+      created_by: "bu-001",
+      tags: ["design-filter"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    await createIndexedEntry(runtime, {
+      title: "Medical Awards 2026",
+      dept: "Medical",
+      type: "Achievement",
+      body: "Accreditation-aligned medical showcase for Phase 1 filtering.",
+      priority: "Normal",
+      entry_date: "2026-01-10",
+      created_by: "ca-001",
+      tags: ["medical-filter"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    await createIndexedEntry(runtime, {
+      title: "Design Awards 2025",
+      dept: "Design",
+      type: "Achievement",
+      body: "Older design showcase that should fall outside the inclusive range.",
+      priority: "Normal",
+      entry_date: "2025-12-31",
+      created_by: "bu-001",
+      tags: ["design-older"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const result = await runtime.modules.ragDb.searchEntryKnowledge({
+      actor: SUPER_ADMIN_ACTOR,
+      queryText: "showcase",
+      filters: {
+        department: "Design",
+        date_range: {
+          start: "2026-01-10",
+          end: "2026-01-10",
+        },
+        sort: "relevance",
+      },
+      limit: 10,
+    });
+
+    expect(result.totalCount).toBe(1);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.title).toBe("Design Awards 2026");
+  });
+
+  it("supports newest sorting with malformed metadata dates degrading safely", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const latest = await createIndexedEntry(runtime, {
+      title: "Phase 1 Fresh Bulletin",
+      dept: "Design",
+      type: "Notice",
+      body: "Fresh bulletin for newest sort validation.",
+      priority: "Normal",
+      entry_date: "2026-03-15",
+      created_by: "bu-001",
+      tags: ["newest-sort"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    const older = await createIndexedEntry(runtime, {
+      title: "Phase 1 Older Bulletin",
+      dept: "Design",
+      type: "Notice",
+      body: "Older bulletin for newest sort validation.",
+      priority: "Normal",
+      entry_date: "2026-01-15",
+      created_by: "bu-001",
+      tags: ["newest-sort"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    const malformed = await createIndexedEntry(runtime, {
+      title: "Phase 1 Malformed Bulletin",
+      dept: "Design",
+      type: "Notice",
+      body: "Malformed date metadata should not crash newest sorting.",
+      priority: "Normal",
+      entry_date: "2026-02-01",
+      created_by: "bu-001",
+      tags: ["newest-sort"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET metadata = jsonb_set(metadata, '{entry_date}', '"2026-99-99"'::jsonb)
+        WHERE id = $1`,
+      [malformed.asset.id],
+    );
+
+    const result = await runtime.modules.ragDb.searchEntryKnowledge({
+      actor: SUPER_ADMIN_ACTOR,
+      queryText: "bulletin",
+      filters: {
+        department: "Design",
+        date_range: {
+          start: null,
+          end: null,
+        },
+        sort: "newest",
+      },
+      limit: 10,
+    });
+
+    expect(result.results.map((item) => item.title)).toEqual([
+      "Phase 1 Fresh Bulletin",
+      "Phase 1 Older Bulletin",
+      "Phase 1 Malformed Bulletin",
+    ]);
+    expect(result.results[0]?.entry_id).toBe(latest.entry.id);
+    expect(result.results[1]?.entry_id).toBe(older.entry.id);
+  });
+
+  it("keeps newest sorting and total counts authoritative beyond the relevance candidate cap", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    for (let day = 1; day <= 30; day += 1) {
+      const entryDate = `2026-03-${String(day).padStart(2, "0")}`;
+      const relevanceBody = day <= 24
+        ? "bulletin ".repeat(20)
+        : "bulletin ";
+
+      await createIndexedEntry(runtime, {
+        title: `Design Bulletin ${String(day).padStart(2, "0")}`,
+        dept: "Design",
+        type: "Notice",
+        body: `${relevanceBody}Authoritative ordering should still prefer the newest entry date.`,
+        priority: "Normal",
+        entry_date: entryDate,
+        created_by: "bu-001",
+        tags: ["newest-cap"],
+        author_name: "Branding User",
+        academic_year: "2025-26",
+        student_count: null,
+        external_link: "",
+        collaborating_org: "",
+      });
+    }
+
+    const result = await runtime.modules.ragDb.searchEntryKnowledge({
+      actor: SUPER_ADMIN_ACTOR,
+      queryText: "bulletin",
+      filters: {
+        department: "Design",
+        date_range: {
+          start: null,
+          end: null,
+        },
+        sort: "newest",
+      },
+      limit: 3,
+    });
+
+    expect(result.totalCount).toBe(30);
+    expect(result.results).toHaveLength(3);
+    expect(result.results.map((item) => item.title)).toEqual([
+      "Design Bulletin 30",
+      "Design Bulletin 29",
+      "Design Bulletin 28",
+    ]);
+  });
+
   it("preserves no-results behavior when embeddings are enabled but the nearest chunk is not relevant enough", async () => {
     const runtime = await createTestRuntime({
       ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
@@ -1255,12 +1451,7 @@ describe("Story 1.2 RAG backend", () => {
           query: {
             mode: "search",
             text: "disabled mode",
-            filters: {
-              departments: [],
-              entry_types: [],
-              priorities: [],
-              tags: [],
-            },
+            filters: EMPTY_FILTERS,
           },
         }),
       });
@@ -1401,16 +1592,11 @@ describe("Story 1.2 RAG backend", () => {
       const searchResults = await runtime.modules.ragDb.searchEntryKnowledge({
         actor: SUPER_ADMIN_ACTOR,
         queryText: "Adobe Creative Suite",
-        filters: {
-          departments: [],
-          entry_types: [],
-          priorities: [],
-          tags: [],
-        },
+        filters: EMPTY_FILTERS,
         limit: 5,
       });
 
-      expect(searchResults.some((result) => result.entry_id === adobeEntry!.id)).toBe(false);
+      expect(searchResults.results.some((result) => result.entry_id === adobeEntry!.id)).toBe(false);
     } finally {
       await stopHttpServer(server);
     }

@@ -5,6 +5,7 @@ export type KnowledgeVisibilityScope = "authenticated" | "team" | "owner" | "exp
 export type AssistantQueryMode = "auto" | "search" | "ask";
 export type AssistantResolvedMode = "search" | "ask";
 export type AssistantActorRole = "super_admin" | "admin" | "sub_admin" | "user";
+export type AssistantQuerySort = "relevance" | "newest";
 
 export interface AssistantActorContext {
   authenticated: true;
@@ -13,11 +14,15 @@ export interface AssistantActorContext {
   team_id: string | null;
 }
 
+export interface AssistantDateRangeFilter {
+  start: string | null;
+  end: string | null;
+}
+
 export interface AssistantQueryFilters {
-  departments: string[];
-  entry_types: string[];
-  priorities: string[];
-  tags: string[];
+  department: string | null;
+  date_range: AssistantDateRangeFilter;
+  sort: AssistantQuerySort;
 }
 
 export interface AssistantQueryInput {
@@ -113,9 +118,16 @@ export interface AssistantQueryResult {
   enough_evidence: boolean;
   grounded: boolean;
   citations: AssistantCitation[];
+  applied_filters: AssistantQueryFilters;
+  total_results: number;
   results: AssistantEntrySearchResult[];
   follow_up_suggestions: string[];
   request_id: string;
+}
+
+export interface AssistantEntrySearchResponse {
+  results: AssistantEntrySearchResult[];
+  totalCount: number;
 }
 
 export interface AssistantSourcePreview {

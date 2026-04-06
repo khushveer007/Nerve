@@ -147,10 +147,12 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
     "mode": "auto",
     "text": "NABH accreditation",
     "filters": {
-      "departments": [],
-      "entry_types": [],
-      "priorities": [],
-      "tags": []
+      "department": "Medical",
+      "date_range": {
+        "start": "2026-01-01",
+        "end": "2026-03-31"
+      },
+      "sort": "newest"
     }
   }
 }
@@ -166,6 +168,15 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
     "enough_evidence": true,
     "grounded": false,
     "citations": [],
+    "applied_filters": {
+      "department": "Medical",
+      "date_range": {
+        "start": "2026-01-01",
+        "end": "2026-03-31"
+      },
+      "sort": "newest"
+    },
+    "total_results": 8,
     "results": [
       {
         "asset_id": "asset_123",
@@ -204,6 +215,9 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
   - `result.mode` is the resolved server mode. Explicit `search` and `ask` selections stay authoritative, while `auto` is routed deterministically to `search` or `ask`.
   - Story 1.4 still keeps `answer` as `null` and `grounded` as `false`; routed `ask` turns stay evidence-led until grounded synthesis lands in a later story.
   - Results are limited to `source_kind = "entry"` in this Phase 1 slice.
+  - Phase 1 filters are `department`, inclusive `date_range.start` / `date_range.end`, and `sort` (`relevance` or `newest`).
+  - `result.applied_filters` snapshots the normalized filters for that submitted turn so transcript history stays stable if the current session filters change later.
+  - `result.total_results` reports the server-side match count before the response result array is truncated by `ASSISTANT_QUERY_RESULT_LIMIT`.
   - Retrieval uses an ACL-safe hybrid pipeline across metadata-aware exact matching, PostgreSQL full-text search, trigram similarity, and vector similarity when query embeddings are configured.
   - If `ASSISTANT_EMBEDDING_URL` is not configured, the route degrades safely to metadata + FTS + trigram retrieval without changing the response shape.
   - Unauthorized assets are excluded before snippets, citations, and follow-up guidance are assembled.

@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
 
-import { FileSearch } from 'lucide-react'
+import { FileSearch, X } from 'lucide-react'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -21,6 +22,11 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile'
 
 import { ASSISTANT_STARTER_PROMPTS, getAssistantAnnouncement } from '../constants'
+import {
+  buildAssistantFilterChips,
+  countActiveAssistantFilters,
+  createAssistantFilters,
+} from '../filters'
 import { useAssistantAvailability } from '../hooks/useAssistantAvailability'
 import {
   useAssistantQuery,
@@ -31,6 +37,7 @@ import type {
   AssistantEntryResult,
   AssistantMessage,
   AssistantMode,
+  AssistantQueryFilters,
   AssistantQueryResult,
   AssistantSourceReference,
   AssistantSourcePreviewPayload,
@@ -49,15 +56,8 @@ function createMessageId() {
   return `assistant-turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-const EMPTY_FILTERS = {
-  departments: [],
-  entry_types: [],
-  priorities: [],
-  tags: [],
-} as const
-
 function buildAssistantSummary(result: AssistantQueryResult, requestedMode: AssistantMode) {
-  if (result.results.length === 0) {
+  if (result.total_results === 0) {
     if (requestedMode === 'auto' && result.mode === 'ask') {
       return 'Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled and no accessible entry-backed matches were found yet.'
     }
@@ -66,19 +66,44 @@ function buildAssistantSummary(result: AssistantQueryResult, requestedMode: Assi
   }
 
   if (requestedMode === 'auto' && result.mode === 'ask') {
-    return `Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled, so I found ${result.results.length} evidence-backed entry result${result.results.length === 1 ? '' : 's'} instead.`
+    return `Auto mode routed this turn through Ask, but grounded answer synthesis is still not enabled, so I found ${result.total_results} evidence-backed entry result${result.total_results === 1 ? '' : 's'} instead.`
   }
 
   if (result.mode === 'ask') {
-    return `Grounded answer synthesis is still not enabled, but I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} for this request.`
+    return `Grounded answer synthesis is still not enabled, but I found ${result.total_results} entry-backed result${result.total_results === 1 ? '' : 's'} for this request.`
   }
 
-  return `I found ${result.results.length} entry-backed result${result.results.length === 1 ? '' : 's'} from the indexed Phase 1 corpus.`
+  return `I found ${result.total_results} entry-backed result${result.total_results === 1 ? '' : 's'} from the indexed Phase 1 corpus.`
+}
+
+function clearAssistantFilterKey(filters: AssistantQueryFilters, key: 'department' | 'date_range' | 'sort') {
+  if (key === 'department') {
+    return {
+      ...filters,
+      department: null,
+    }
+  }
+
+  if (key === 'date_range') {
+    return {
+      ...filters,
+      date_range: {
+        start: null,
+        end: null,
+      },
+    }
+  }
+
+  return {
+    ...filters,
+    sort: 'relevance',
+  }
 }
 
 export default function AssistantPage() {
   const [mode, setMode] = useState<AssistantMode>('auto')
   const [draft, setDraft] = useState('')
+  const [filters, setFilters] = useState<AssistantQueryFilters>(() => createAssistantFilters())
   const [messages, setMessages] = useState<AssistantMessage[]>([])
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
@@ -104,6 +129,8 @@ export default function AssistantPage() {
   const hasTranscript = messages.length > 0
   const lastAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
   const isSubmitting = pendingConversationId === conversationIdRef.current
+  const activeFilterChips = buildAssistantFilterChips(filters)
+  const activeFilterCount = countActiveAssistantFilters(filters)
 
   const visibleState: AssistantVisibleState = useMemo(() => {
     if (showUnavailable) {
@@ -158,7 +185,7 @@ export default function AssistantPage() {
       return {
         kind: 'no_answer',
         title: 'No accessible entry-backed matches were found.',
-        description: 'Retry the same query or refine it with a title phrase, department name, or tag.',
+        description: 'Retry the same query or refine it with a title phrase, department name, or date range.',
       }
     }
 
@@ -320,7 +347,7 @@ export default function AssistantPage() {
         query: {
           mode: effectiveMode,
           text: content,
-          filters: EMPTY_FILTERS,
+          filters,
         },
       })
 
@@ -381,6 +408,10 @@ export default function AssistantPage() {
     focusComposer()
   }
 
+  function handleClearAllFilters() {
+    setFilters(createAssistantFilters())
+  }
+
   const announcement = getAssistantAnnouncement(visibleState)
 
   return (
@@ -393,6 +424,33 @@ export default function AssistantPage() {
       />
 
       <AssistantModeToggle mode={mode} onModeChange={setMode} />
+
+      {activeFilterCount > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-muted/30 p-3">
+          <Badge variant="outline">Active filters</Badge>
+          {activeFilterChips.map((chip) => (
+            <Button
+              aria-label={`Remove ${chip.label}`}
+              key={chip.key}
+              onClick={() => setFilters((current) => clearAssistantFilterKey(current, chip.key))}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {chip.label}
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          ))}
+          <Button
+            onClick={handleClearAllFilters}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Clear all filters
+          </Button>
+        </div>
+      )}
 
       {(visibleState.kind === 'loading' || visibleState.kind === 'info' || visibleState.kind === 'unavailable') && (
         <AssistantStatusCard status={visibleState} />
@@ -443,7 +501,10 @@ export default function AssistantPage() {
 
         <div className="hidden lg:block">
           <AssistantContextPanel
+            filters={filters}
             mode={mode}
+            onClearFilters={handleClearAllFilters}
+            onFiltersChange={setFilters}
             onOpenSource={selectedPreview ? () => {
               void handleOpenSource(selectedPreview)
             } : undefined}
@@ -472,10 +533,17 @@ export default function AssistantPage() {
           <DrawerContent>
             <DrawerHeader>
               <DrawerTitle>Filters</DrawerTitle>
-            <DrawerDescription>Filter and scope controls will connect here in the next story.</DrawerDescription>
-          </DrawerHeader>
+              <DrawerDescription>Apply Phase 1 department, date, and sort filters for this assistant session.</DrawerDescription>
+            </DrawerHeader>
           <div className="px-4 pb-6">
-            <AssistantContextPanel mode={mode} section="filters" transcriptCount={messages.length} />
+            <AssistantContextPanel
+              filters={filters}
+              mode={mode}
+              onClearFilters={handleClearAllFilters}
+              onFiltersChange={setFilters}
+              section="filters"
+              transcriptCount={messages.length}
+            />
           </div>
         </DrawerContent>
       </Drawer>
@@ -484,10 +552,17 @@ export default function AssistantPage() {
           <SheetContent className="w-full sm:max-w-lg" side="right">
             <SheetHeader>
               <SheetTitle>Filters</SheetTitle>
-              <SheetDescription>Filter and scope controls will connect here in the next story.</SheetDescription>
+              <SheetDescription>Apply Phase 1 department, date, and sort filters for this assistant session.</SheetDescription>
             </SheetHeader>
             <div className="mt-6">
-              <AssistantContextPanel mode={mode} section="filters" transcriptCount={messages.length} />
+              <AssistantContextPanel
+                filters={filters}
+                mode={mode}
+                onClearFilters={handleClearAllFilters}
+                onFiltersChange={setFilters}
+                section="filters"
+                transcriptCount={messages.length}
+              />
             </div>
           </SheetContent>
         </Sheet>
@@ -503,7 +578,10 @@ export default function AssistantPage() {
           </DrawerHeader>
           <div className="px-4 pb-6">
             <AssistantContextPanel
+              filters={filters}
               mode={mode}
+              onClearFilters={handleClearAllFilters}
+              onFiltersChange={setFilters}
               onOpenSource={selectedPreview ? () => {
                 void handleOpenSource(selectedPreview)
               } : undefined}

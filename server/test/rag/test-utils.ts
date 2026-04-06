@@ -61,7 +61,7 @@ export async function createTestRuntime(envOverrides: Record<string, string> = {
     SUPER_ADMIN_EMAIL: "super@parul.ac.in",
     SUPER_ADMIN_PASSWORD: "Test-Password-123!",
     ASSISTANT_RAG_ENABLED: "true",
-    ASSISTANT_QUERY_RESULT_LIMIT: "5",
+    ASSISTANT_QUERY_RESULT_LIMIT: "20",
     ASSISTANT_EMBEDDING_URL: "",
     ASSISTANT_EMBEDDING_API_KEY: "",
     ASSISTANT_EMBEDDING_API_HEADER: "Authorization",

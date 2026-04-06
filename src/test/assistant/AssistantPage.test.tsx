@@ -46,7 +46,16 @@ function buildAssistantQueryResponse() {
       grounded: false,
       citations: [],
       follow_up_suggestions: [],
+      applied_filters: {
+        department: null,
+        date_range: {
+          start: null,
+          end: null,
+        },
+        sort: 'relevance',
+      },
       request_id: 'req_test_1',
+      total_results: 1,
       results: [
         {
           asset_id: 'asset_1',
@@ -114,10 +123,19 @@ function buildNoResultsQueryResponse() {
       grounded: false,
       citations: [],
       follow_up_suggestions: [
-        'Try an exact entry title, department name, or tag from the existing corpus.',
+        'Try an exact entry title, department name, or date range from the existing corpus.',
         'Keep queries entry-focused in Phase 1 because uploads and mixed media arrive in later stories.',
       ],
+      applied_filters: {
+        department: null,
+        date_range: {
+          start: null,
+          end: null,
+        },
+        sort: 'relevance',
+      },
       request_id: 'req_test_empty',
+      total_results: 0,
       results: [],
     },
   }
@@ -176,6 +194,29 @@ function buildAssistantOpenResponse() {
       },
     },
   }
+}
+
+function buildAssistantQueryResponseWithManyResults(totalResults = 6) {
+  const payload = buildAssistantQueryResponse()
+  payload.result.total_results = totalResults
+  payload.result.results = Array.from({ length: totalResults }, (_, index) => ({
+    ...payload.result.results[0],
+    asset_id: `asset_${index + 1}`,
+    asset_version_id: `asset_ver_${index + 1}`,
+    chunk_id: `chunk_${index + 1}`,
+    entry_id: `entry_${index + 1}`,
+    title: `Design Department Result ${index + 1}`,
+    snippet: `Result snippet ${index + 1} for the assistant transcript.`,
+    citation_locator: {
+      ...payload.result.results[0].citation_locator,
+      asset_id: `asset_${index + 1}`,
+      asset_version_id: `asset_ver_${index + 1}`,
+      chunk_id: `chunk_${index + 1}`,
+      title: `Design Department Result ${index + 1}`,
+    },
+  }))
+
+  return payload
 }
 
 describe('AIQueryPage', () => {
@@ -295,10 +336,12 @@ describe('AIQueryPage', () => {
               mode: 'search',
               text: 'Adobe Creative Suite',
               filters: {
-                departments: [],
-                entry_types: [],
-                priorities: [],
-                tags: [],
+                department: null,
+                date_range: {
+                  start: null,
+                  end: null,
+                },
+                sort: 'relevance',
               },
             },
           }),
@@ -333,12 +376,185 @@ describe('AIQueryPage', () => {
     fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
 
     expect(await screen.findByText('Design Department Partners with Adobe for Creative Suite')).toBeInTheDocument()
-    expect(screen.getByText(/1 entry-backed result/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/1 entry-backed result/i).length).toBeGreaterThan(0)
     expect(screen.getByText('Adobe Inc.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Preview' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open source' })).toBeInTheDocument()
     expect(screen.queryByText(/local keyword search results/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/AI backend disconnected/i)).not.toBeInTheDocument()
+  })
+
+  it('submits Phase 1 filters, snapshots them per turn, and reveals more than five results on demand', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const queryPayload = buildAssistantQueryResponseWithManyResults(6)
+    queryPayload.result.applied_filters = {
+      department: 'Design',
+      date_range: {
+        start: '2026-01-01',
+        end: '2026-01-31',
+      },
+      sort: 'newest',
+    }
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        expect(init?.body).toBe(
+          JSON.stringify({
+            query: {
+              mode: 'search',
+              text: 'Adobe Creative Suite',
+              filters: {
+                department: 'Design',
+                date_range: {
+                  start: '2026-01-01',
+                  end: '2026-01-31',
+                },
+                sort: 'newest',
+              },
+            },
+          }),
+        )
+
+        return {
+          ok: true,
+          json: async () => queryPayload,
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText('Department'), { target: { value: 'Design' } })
+    fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-01-01' } })
+    fireEvent.change(screen.getByLabelText('To date'), { target: { value: '2026-01-31' } })
+    fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'newest' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Adobe Creative Suite' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('Design Department Result 1')).toBeInTheDocument()
+    expect(screen.getAllByText('Department: Design').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Date: Jan 1, 2026 to Jan 31, 2026').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Sort: Newest').length).toBeGreaterThan(0)
+    expect(screen.getByText('6 entry-backed results')).toBeInTheDocument()
+    expect(screen.queryByText('Design Department Result 6')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show more results' }))
+
+    expect(await screen.findByText('Design Department Result 6')).toBeInTheDocument()
+  })
+
+  it('keeps filters across new conversations and clears them only through direct filter actions', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const queryBodies: string[] = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        queryBodies.push(String(init?.body))
+        return {
+          ok: true,
+          json: async () => buildAssistantQueryResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText('Department'), { target: { value: 'Design' } })
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Adobe Creative Suite' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('Department: Design')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    expect(screen.getByLabelText('Department')).toHaveValue('Design')
+    expect(screen.getByText('Department: Design')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+
+    expect(screen.getByLabelText('Department')).toHaveValue('')
+    expect(screen.queryByText('Department: Design')).not.toBeInTheDocument()
+
+    fireEvent.change(composer, { target: { value: 'Adobe Creative Suite' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    await waitFor(() => {
+      expect(queryBodies).toHaveLength(2)
+    })
+
+    expect(queryBodies[1]).toBe(
+      JSON.stringify({
+        query: {
+          mode: 'auto',
+          text: 'Adobe Creative Suite',
+          filters: {
+            department: null,
+            date_range: {
+              start: null,
+              end: null,
+            },
+            sort: 'relevance',
+          },
+        },
+      }),
+    )
   })
 
   it('loads a permission-safe preview into the evidence panel and omits blocked actions from result cards', async () => {
@@ -858,7 +1074,7 @@ describe('AIQueryPage', () => {
     fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
 
     expect((await screen.findAllByText(/no accessible entry-backed matches/i)).length).toBeGreaterThan(0)
-    expect(screen.getByText(/exact entry title, department name, or tag/i)).toBeInTheDocument()
+    expect(screen.getByText(/exact entry title, department name, or date range/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit original query' })).toBeInTheDocument()
 

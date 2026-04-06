@@ -53,7 +53,7 @@ export async function getAssistantHealth(): Promise<AssistantHealthResponse> {
 function buildFollowUpSuggestions(resultCount: number, mode: AssistantQueryResult["mode"]) {
   if (resultCount === 0) {
     return [
-      "Try an exact entry title, department name, or tag from the existing corpus.",
+      "Try an exact entry title, department name, or date range from the existing corpus.",
       "Keep queries entry-focused in Phase 1 because uploads and mixed media arrive in later stories.",
     ];
   }
@@ -66,7 +66,7 @@ function buildFollowUpSuggestions(resultCount: number, mode: AssistantQueryResul
   }
 
   return [
-    "Refine the query with a department, title phrase, or date to narrow the corpus.",
+    "Refine the query with a department, title phrase, or date range to narrow the corpus.",
     "Switch to Ask mode later when grounded synthesis is enabled on top of this corpus.",
   ];
 }
@@ -86,7 +86,7 @@ export async function executeAssistantQuery(
     }
   }
 
-  const results = await searchEntryKnowledge({
+  const search = await searchEntryKnowledge({
     actor,
     queryText: input.text,
     queryEmbedding,
@@ -98,9 +98,9 @@ export async function executeAssistantQuery(
   return {
     mode: resolvedMode,
     answer: null,
-    enough_evidence: results.length > 0,
+    enough_evidence: search.totalCount > 0,
     grounded: false,
-    citations: results.slice(0, 3).map((result, index) => ({
+    citations: search.results.slice(0, 3).map((result, index) => ({
       label: `S${index + 1}`,
       asset_id: result.asset_id,
       title: result.title,
@@ -108,8 +108,10 @@ export async function executeAssistantQuery(
       snippet: result.snippet,
       citation_locator: result.citation_locator,
     })),
-    results,
-    follow_up_suggestions: buildFollowUpSuggestions(results.length, resolvedMode),
+    applied_filters: input.filters,
+    total_results: search.totalCount,
+    results: search.results,
+    follow_up_suggestions: buildFollowUpSuggestions(search.totalCount, resolvedMode),
     request_id: randomUUID(),
   };
 }

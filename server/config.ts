@@ -59,7 +59,7 @@ export const config = {
   },
   assistant: {
     enabled: getBooleanEnv("ASSISTANT_RAG_ENABLED", true),
-    queryResultLimit: getNumberEnv("ASSISTANT_QUERY_RESULT_LIMIT", 5),
+    queryResultLimit: getNumberEnv("ASSISTANT_QUERY_RESULT_LIMIT", 20),
     embeddings: {
       url: optionalEnv("ASSISTANT_EMBEDDING_URL"),
       apiKey: optionalEnv("ASSISTANT_EMBEDDING_API_KEY"),

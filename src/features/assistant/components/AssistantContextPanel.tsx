@@ -5,10 +5,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 
-import type { AssistantMode, AssistantSourcePreviewPayload } from '../types'
+import type { AssistantMode, AssistantQueryFilters, AssistantSourcePreviewPayload } from '../types'
+import AssistantFiltersPanel from './AssistantFiltersPanel'
 
 interface AssistantContextPanelProps {
+  filters?: AssistantQueryFilters
   mode: AssistantMode
+  onFiltersChange?: ((filters: AssistantQueryFilters) => void) | undefined
+  onClearFilters?: (() => void) | undefined
   section?: 'full' | 'filters' | 'evidence'
   transcriptCount: number
   preview?: AssistantSourcePreviewPayload | null
@@ -19,27 +23,6 @@ interface AssistantContextPanelProps {
   previewLoading?: boolean
   onOpenSource?: (() => void) | undefined
   openSourcePending?: boolean
-}
-
-function FiltersSection({ mode }: { mode: AssistantMode }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold text-foreground">Filters</p>
-          <p className="text-sm text-muted-foreground">
-            Retrieval filters will narrow results in the next story.
-          </p>
-        </div>
-        <Badge variant="outline">{mode}</Badge>
-      </div>
-
-      <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-        Filter chips, departments, and scoped evidence controls are reserved here so later stories can
-        connect them without redesigning the shell.
-      </div>
-    </div>
-  )
 }
 
 function EvidenceSection({
@@ -167,7 +150,10 @@ function EvidenceSection({
 }
 
 export default function AssistantContextPanel({
+  filters,
   mode,
+  onFiltersChange,
+  onClearFilters,
   section = 'full',
   transcriptCount,
   preview = null,
@@ -182,7 +168,14 @@ export default function AssistantContextPanel({
         <CardTitle className="text-lg">Workspace context</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        {(section === 'full' || section === 'filters') && <FiltersSection mode={mode} />}
+        {(section === 'full' || section === 'filters') && filters && onFiltersChange && onClearFilters && (
+          <AssistantFiltersPanel
+            filters={filters}
+            mode={mode}
+            onChange={onFiltersChange}
+            onClearAll={onClearFilters}
+          />
+        )}
         {section === 'full' && <Separator />}
         {(section === 'full' || section === 'evidence') && (
           <EvidenceSection
