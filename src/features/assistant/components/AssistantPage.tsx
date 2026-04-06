@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { FileSearch, X } from 'lucide-react'
 
@@ -22,6 +22,7 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile'
 
 import { ASSISTANT_STARTER_PROMPTS, getAssistantAnnouncement } from '../constants'
+import { buildAssistantSourceKey } from '../evidence'
 import {
   buildAssistantFilterChips,
   countActiveAssistantFilters,
@@ -34,6 +35,8 @@ import {
   useAssistantSourcePreview,
 } from '../hooks/useAssistantQuery'
 import type {
+  AssistantCitation,
+  AssistantEvidenceSelection,
   AssistantEntryResult,
   AssistantMessage,
   AssistantMode,
@@ -113,7 +116,7 @@ export default function AssistantPage() {
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [pendingConversationId, setPendingConversationId] = useState<number | null>(null)
   const [pendingMode, setPendingMode] = useState<AssistantMode | null>(null)
-  const [selectedPreview, setSelectedPreview] = useState<AssistantEntryResult | null>(null)
+  const [selectedEvidence, setSelectedEvidence] = useState<AssistantEvidenceSelection | null>(null)
   const [selectedPreviewPayload, setSelectedPreviewPayload] = useState<AssistantSourcePreviewPayload | null>(null)
   const [sourceActionError, setSourceActionError] = useState<null | {
     title: string
@@ -121,7 +124,7 @@ export default function AssistantPage() {
   }>(null)
 
   const conversationIdRef = useRef(0)
-  const sourceActionScopeRef = useRef(0)
+  const evidenceSelectionVersionRef = useRef(0)
   const previewRequestIdRef = useRef(0)
   const openRequestIdRef = useRef(0)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -136,6 +139,22 @@ export default function AssistantPage() {
   const isSubmitting = pendingConversationId === conversationIdRef.current
   const activeFilterChips = buildAssistantFilterChips(filters)
   const activeFilterCount = countActiveAssistantFilters(filters)
+  const previewPendingSourceKey = previewMutation.isPending && previewMutation.variables
+    ? buildAssistantSourceKey(previewMutation.variables.preview.source)
+    : null
+  const openPendingSourceKey = openMutation.isPending && openMutation.variables
+    ? buildAssistantSourceKey(openMutation.variables.open.source)
+    : null
+  const activeCitation = selectedEvidence?.citation
+    ? {
+        messageId: selectedEvidence.ownerMessageId,
+        label: selectedEvidence.citation.label,
+      }
+    : null
+  const evidencePreviewLoading = selectedEvidence !== null
+    && previewPendingSourceKey === buildAssistantSourceKey(selectedEvidence.source)
+  const evidenceOpenPending = selectedEvidence !== null
+    && openPendingSourceKey === buildAssistantSourceKey(selectedEvidence.source)
 
   const visibleState: AssistantVisibleState = useMemo(() => {
     if (showUnavailable) {
@@ -224,13 +243,20 @@ export default function AssistantPage() {
     return { kind: 'result' }
   }, [availability, hasTranscript, isChecking, isSubmitting, lastAssistantMessage, pendingMode, showUnavailable])
 
+  useEffect(() => {
+    if (selectedEvidence === null && evidenceOpen) {
+      setEvidenceOpen(false)
+    }
+  }, [evidenceOpen, selectedEvidence])
+
   function focusComposer() {
     composerRef.current?.focus()
   }
 
-  function invalidateSourceActions() {
-    sourceActionScopeRef.current += 1
-    setSelectedPreview(null)
+  function resetEvidenceState() {
+    evidenceSelectionVersionRef.current += 1
+    setEvidenceOpen(false)
+    setSelectedEvidence(null)
     setSelectedPreviewPayload(null)
     setSourceActionError(null)
   }
@@ -245,39 +271,111 @@ export default function AssistantPage() {
     }
   }
 
-  async function handlePreviewSource(result: AssistantEntryResult) {
-    const sourceActionScope = sourceActionScopeRef.current
+  function buildCitationSelection(
+    message: AssistantMessage,
+    turnResult: AssistantQueryResult,
+    citation: AssistantCitation,
+  ): AssistantEvidenceSelection {
+    const matchingResult = turnResult.results.find((result) => (
+      buildAssistantSourceKey(buildSourceReference(result)) === buildAssistantSourceKey(citation.source)
+    ))
+
+    return {
+      ownerMessageId: message.id,
+      ownerRequestId: turnResult.request_id,
+      citation,
+      relatedCitations: turnResult.citations,
+      source: citation.source,
+      title: citation.title,
+      snippet: citation.snippet,
+      citationLocator: citation.citation_locator,
+      metadata: matchingResult?.metadata ?? null,
+      actions: citation.actions,
+    }
+  }
+
+  function buildResultSelection(
+    message: AssistantMessage,
+    turnResult: AssistantQueryResult,
+    result: AssistantEntryResult,
+  ): AssistantEvidenceSelection {
+    return {
+      ownerMessageId: message.id,
+      ownerRequestId: turnResult.request_id,
+      citation: null,
+      relatedCitations: turnResult.citations.filter((citation) => (
+        buildAssistantSourceKey(citation.source) === buildAssistantSourceKey(buildSourceReference(result))
+      )),
+      source: buildSourceReference(result),
+      title: result.title,
+      snippet: result.snippet,
+      citationLocator: result.citation_locator,
+      metadata: result.metadata,
+      actions: result.actions,
+    }
+  }
+
+  function isSameEvidenceSelection(
+    left: AssistantEvidenceSelection | null,
+    right: AssistantEvidenceSelection,
+  ) {
+    return left !== null
+      && left.ownerMessageId === right.ownerMessageId
+      && left.ownerRequestId === right.ownerRequestId
+      && buildAssistantSourceKey(left.source) === buildAssistantSourceKey(right.source)
+      && left.citation?.label === right.citation?.label
+  }
+
+  function selectEvidence(selection: AssistantEvidenceSelection, openSurface = true) {
+    if (isSameEvidenceSelection(selectedEvidence, selection)) {
+      if (openSurface && isMobile) {
+        setEvidenceOpen(true)
+      }
+
+      return evidenceSelectionVersionRef.current
+    }
+
+    evidenceSelectionVersionRef.current += 1
+    setSelectedEvidence(selection)
+    setSelectedPreviewPayload(null)
+    setSourceActionError(null)
+
+    if (openSurface && isMobile) {
+      setEvidenceOpen(true)
+    }
+
+    return evidenceSelectionVersionRef.current
+  }
+
+  async function handlePreviewSource(selection: AssistantEvidenceSelection) {
+    const selectionVersion = selectEvidence(selection)
     const requestId = ++previewRequestIdRef.current
     setSourceActionError(null)
 
     try {
       const payload = await previewMutation.mutateAsync({
         preview: {
-          source: buildSourceReference(result),
+          source: selection.source,
         },
       })
 
       if (
-        sourceActionScope !== sourceActionScopeRef.current
+        selectionVersion !== evidenceSelectionVersionRef.current
         || requestId !== previewRequestIdRef.current
       ) {
         return
       }
 
-      setSelectedPreview(result)
       setSelectedPreviewPayload(payload.preview)
-      setEvidenceOpen(true)
     } catch (error) {
       if (
-        sourceActionScope !== sourceActionScopeRef.current
+        selectionVersion !== evidenceSelectionVersionRef.current
         || requestId !== previewRequestIdRef.current
       ) {
         return
       }
 
-      setSelectedPreview(null)
       setSelectedPreviewPayload(null)
-      setEvidenceOpen(true)
       setSourceActionError({
         title: 'Source preview unavailable.',
         description: error instanceof Error
@@ -287,20 +385,20 @@ export default function AssistantPage() {
     }
   }
 
-  async function handleOpenSource(result: AssistantEntryResult) {
-    const sourceActionScope = sourceActionScopeRef.current
+  async function handleOpenSource(selection: AssistantEvidenceSelection) {
+    const selectionVersion = selectEvidence(selection)
     const requestId = ++openRequestIdRef.current
     setSourceActionError(null)
 
     try {
       const payload = await openMutation.mutateAsync({
         open: {
-          source: buildSourceReference(result),
+          source: selection.source,
         },
       })
 
       if (
-        sourceActionScope !== sourceActionScopeRef.current
+        selectionVersion !== evidenceSelectionVersionRef.current
         || requestId !== openRequestIdRef.current
       ) {
         return
@@ -309,13 +407,12 @@ export default function AssistantPage() {
       window.location.assign(payload.open.target.path)
     } catch (error) {
       if (
-        sourceActionScope !== sourceActionScopeRef.current
+        selectionVersion !== evidenceSelectionVersionRef.current
         || requestId !== openRequestIdRef.current
       ) {
         return
       }
 
-      setEvidenceOpen(true)
       setSourceActionError({
         title: 'Source open unavailable.',
         description: error instanceof Error
@@ -323,6 +420,30 @@ export default function AssistantPage() {
           : 'The assistant could not open that source.',
       })
     }
+  }
+
+  function handleSelectCitation(message: AssistantMessage, citation: AssistantCitation) {
+    if (!message.result) {
+      return
+    }
+
+    selectEvidence(buildCitationSelection(message, message.result, citation))
+  }
+
+  function handlePreviewResult(message: AssistantMessage, result: AssistantEntryResult) {
+    if (!message.result) {
+      return
+    }
+
+    void handlePreviewSource(buildResultSelection(message, message.result, result))
+  }
+
+  function handleOpenResult(message: AssistantMessage, result: AssistantEntryResult) {
+    if (!message.result) {
+      return
+    }
+
+    void handleOpenSource(buildResultSelection(message, message.result, result))
   }
 
   function handleEditOriginalQuery(queryText: string, queryMode: AssistantMode) {
@@ -353,7 +474,7 @@ export default function AssistantPage() {
     setDraft('')
     setPendingConversationId(conversationId)
     setPendingMode(effectiveMode)
-    invalidateSourceActions()
+    resetEvidenceState()
     focusComposer()
 
     if (showUnavailable) {
@@ -434,7 +555,7 @@ export default function AssistantPage() {
     conversationIdRef.current += 1
     setPendingConversationId(null)
     setPendingMode(null)
-    invalidateSourceActions()
+    resetEvidenceState()
     queryMutation.reset()
     previewMutation.reset()
     openMutation.reset()
@@ -497,15 +618,13 @@ export default function AssistantPage() {
             <AssistantTranscript
               messages={messages}
               onEditQuery={handleEditOriginalQuery}
-              onOpenSource={(result) => {
-                void handleOpenSource(result)
-              }}
-              onPreviewSource={(result) => {
-                void handlePreviewSource(result)
-              }}
+              onOpenSource={handleOpenResult}
+              onPreviewSource={handlePreviewResult}
+              onSelectCitation={handleSelectCitation}
               onRetryQuery={(queryText, queryMode) => {
                 void handleSubmit(queryText, queryMode)
               }}
+              activeCitation={activeCitation}
               openSourcePendingId={openMutation.isPending ? (openMutation.variables?.open.source.chunk_id ?? null) : null}
               previewSourcePendingId={previewMutation.isPending ? (previewMutation.variables?.preview.source.chunk_id ?? null) : null}
             />
@@ -520,9 +639,9 @@ export default function AssistantPage() {
                   <FileSearch className="h-5 w-5" />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-foreground">Evidence surface reserved</p>
+                  <p className="text-sm font-semibold text-foreground">Evidence verification</p>
                   <p className="text-sm text-muted-foreground">
-                    Open the evidence drawer to review where citations and supporting passages will appear.
+                    Focus a citation or open the drawer to inspect permission-safe supporting entry evidence.
                   </p>
                 </div>
               </div>
@@ -540,13 +659,26 @@ export default function AssistantPage() {
             mode={mode}
             onClearFilters={handleClearAllFilters}
             onFiltersChange={setFilters}
-            onOpenSource={selectedPreview ? () => {
-              void handleOpenSource(selectedPreview)
+            evidence={selectedEvidence}
+            onOpenSource={selectedEvidence ? () => {
+              void handleOpenSource(selectedEvidence)
             } : undefined}
-            openSourcePending={openMutation.isPending}
+            onPreviewEvidence={selectedEvidence ? () => {
+              void handlePreviewSource(selectedEvidence)
+            } : undefined}
+            onSelectCitation={selectedEvidence
+              ? (citation) => {
+                  const ownerMessage = messages.find((message) => message.id === selectedEvidence.ownerMessageId)
+
+                  if (ownerMessage) {
+                    handleSelectCitation(ownerMessage, citation)
+                  }
+                }
+              : undefined}
+            openSourcePending={evidenceOpenPending}
             preview={selectedPreviewPayload}
             previewError={sourceActionError}
-            previewLoading={previewMutation.isPending}
+            previewLoading={evidencePreviewLoading}
             transcriptCount={messages.length}
           />
         </div>
@@ -608,7 +740,7 @@ export default function AssistantPage() {
           <DrawerHeader>
             <DrawerTitle>Evidence</DrawerTitle>
             <DrawerDescription>
-              This drawer shows permission-safe supporting source previews for assistant results.
+              Inspect citation-backed entry evidence without leaving the authenticated assistant workspace.
             </DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-6">
@@ -617,13 +749,26 @@ export default function AssistantPage() {
               mode={mode}
               onClearFilters={handleClearAllFilters}
               onFiltersChange={setFilters}
-              onOpenSource={selectedPreview ? () => {
-                void handleOpenSource(selectedPreview)
+              evidence={selectedEvidence}
+              onOpenSource={selectedEvidence ? () => {
+                void handleOpenSource(selectedEvidence)
               } : undefined}
-              openSourcePending={openMutation.isPending}
+              onPreviewEvidence={selectedEvidence ? () => {
+                void handlePreviewSource(selectedEvidence)
+              } : undefined}
+              onSelectCitation={selectedEvidence
+                ? (citation) => {
+                    const ownerMessage = messages.find((message) => message.id === selectedEvidence.ownerMessageId)
+
+                    if (ownerMessage) {
+                      handleSelectCitation(ownerMessage, citation)
+                    }
+                  }
+                : undefined}
+              openSourcePending={evidenceOpenPending}
               preview={selectedPreviewPayload}
               previewError={sourceActionError}
-              previewLoading={previewMutation.isPending}
+              previewLoading={evidencePreviewLoading}
               section="evidence"
               transcriptCount={messages.length}
             />

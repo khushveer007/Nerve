@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
+import { buildCitationAccessibleLabel } from '../evidence'
 import { buildAssistantFilterChips } from '../filters'
 import type {
   AssistantCitation,
@@ -18,16 +19,29 @@ import type {
 interface AssistantTranscriptProps {
   onEditQuery: (queryText: string, queryMode: AssistantMode) => void
   messages: AssistantMessage[]
-  onOpenSource: (result: AssistantEntryResult) => void
-  onPreviewSource: (result: AssistantEntryResult) => void
+  onOpenSource: (message: AssistantMessage, result: AssistantEntryResult) => void
+  onPreviewSource: (message: AssistantMessage, result: AssistantEntryResult) => void
+  onSelectCitation: (message: AssistantMessage, citation: AssistantCitation) => void
   onRetryQuery: (queryText: string, queryMode: AssistantMode) => void
   openSourcePendingId?: string | null
   previewSourcePendingId?: string | null
+  activeCitation?: {
+    messageId: string
+    label: string
+  } | null
 }
 
 interface AnswerBlock {
-  text: string
-  labels: string[]
+  segments: Array<
+    | {
+        type: 'text'
+        text: string
+      }
+    | {
+        type: 'citation'
+        label: string
+      }
+  >
 }
 
 function formatTimestamp(timestamp: string) {
@@ -45,33 +59,86 @@ function parseAnswerBlocks(answer: string): AnswerBlock[] {
   return answer
     .split(/\n\s*\n/)
     .map((paragraph) => {
-      const labels = Array.from(paragraph.matchAll(/\[(S\d+)\]/g)).map((match) => match[1])
-      const text = paragraph.replace(/\s*\[(S\d+)\]/g, '').trim()
+      const segments: AnswerBlock['segments'] = []
+      const normalizedParagraph = paragraph.trim()
+      const citationPattern = /\[(S\d+)\]/g
+      let lastIndex = 0
+      let match: RegExpExecArray | null = null
+
+      while ((match = citationPattern.exec(normalizedParagraph)) !== null) {
+        const rawText = normalizedParagraph.slice(lastIndex, match.index)
+        const text = segments.at(-1)?.type === 'citation'
+          ? rawText.trimStart()
+          : rawText.replace(/\s+$/, '')
+
+        if (text.length > 0) {
+          segments.push({
+            type: 'text',
+            text,
+          })
+        }
+
+        segments.push({
+          type: 'citation',
+          label: match[1],
+        })
+
+        lastIndex = citationPattern.lastIndex
+      }
+
+      const tail = normalizedParagraph.slice(lastIndex)
+      const trailingText = segments.at(-1)?.type === 'citation'
+        ? tail.trimStart()
+        : tail
+
+      if (trailingText.length > 0) {
+        segments.push({
+          type: 'text',
+          text: trailingText,
+        })
+      }
 
       return {
-        text,
-        labels,
+        segments,
       }
     })
-    .filter((block) => block.text.length > 0)
+    .filter((block) => block.segments.length > 0)
 }
 
-function renderCitationBadge(citation: AssistantCitation) {
+function renderCitationBadge(
+  message: AssistantMessage,
+  citation: AssistantCitation,
+  isActive: boolean,
+  onSelectCitation: (message: AssistantMessage, citation: AssistantCitation) => void,
+) {
   return (
-    <Badge
-      aria-label={`Citation ${citation.label}: ${citation.title}`}
+    <Button
+      aria-label={buildCitationAccessibleLabel(citation)}
+      aria-pressed={isActive}
+      className={[
+        'mx-1 inline-flex min-h-11 min-w-11 align-middle rounded-full border px-3 py-2 text-left text-sm focus-visible:ring-2 focus-visible:ring-ring',
+        isActive
+          ? 'border-emerald-500 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+          : 'border-border/70 bg-background/90 hover:bg-accent',
+      ].join(' ')}
       key={`${citation.asset_id}-${citation.label}`}
+      onClick={() => onSelectCitation(message, citation)}
+      onFocus={() => onSelectCitation(message, citation)}
+      size="sm"
+      type="button"
       variant="outline"
     >
-      {citation.label}
-    </Badge>
+      <span className="font-semibold">{citation.label}</span>
+      {isActive && <span className="text-xs uppercase tracking-[0.14em]">Selected</span>}
+    </Button>
   )
 }
 
 function renderResultCard(
+  message: AssistantMessage,
   result: AssistantEntryResult,
-  onPreviewSource: (result: AssistantEntryResult) => void,
-  onOpenSource: (result: AssistantEntryResult) => void,
+  onPreviewSource: (message: AssistantMessage, result: AssistantEntryResult) => void,
+  onOpenSource: (message: AssistantMessage, result: AssistantEntryResult) => void,
   previewSourcePendingId: string | null,
   openSourcePendingId: string | null,
 ) {
@@ -126,8 +193,9 @@ function renderResultCard(
           <div className="flex flex-wrap gap-2 pt-2">
             {previewAvailable && (
               <Button
+                className="min-h-11"
                 disabled={previewSourcePendingId === result.chunk_id}
-                onClick={() => onPreviewSource(result)}
+                onClick={() => onPreviewSource(message, result)}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -138,8 +206,9 @@ function renderResultCard(
 
             {openSourceAvailable && (
               <Button
+                className="min-h-11"
                 disabled={openSourcePendingId === result.chunk_id}
-                onClick={() => onOpenSource(result)}
+                onClick={() => onOpenSource(message, result)}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -176,8 +245,10 @@ function renderAskState(
   expanded: boolean,
   onRetryQuery: (queryText: string, queryMode: AssistantMode) => void,
   onEditQuery: (queryText: string, queryMode: AssistantMode) => void,
-  onPreviewSource: (result: AssistantEntryResult) => void,
-  onOpenSource: (result: AssistantEntryResult) => void,
+  onPreviewSource: (message: AssistantMessage, result: AssistantEntryResult) => void,
+  onOpenSource: (message: AssistantMessage, result: AssistantEntryResult) => void,
+  onSelectCitation: (message: AssistantMessage, citation: AssistantCitation) => void,
+  activeCitation: { messageId: string; label: string } | null,
   previewSourcePendingId: string | null,
   openSourcePendingId: string | null,
   onShowMore: () => void,
@@ -225,15 +296,27 @@ function renderAskState(
           <div className="space-y-3">
             {parseAnswerBlocks(result.answer).map((block, index) => (
               <div className="space-y-2" key={`${message.id}-answer-${index}`}>
-                <p className="text-sm leading-6 text-foreground">{block.text}</p>
-                {block.labels.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {block.labels.map((label) => {
-                      const citation = result.citations.find((item) => item.label === label)
-                      return citation ? renderCitationBadge(citation) : null
-                    })}
-                  </div>
-                )}
+                <p className="text-sm leading-7 text-foreground">
+                  {block.segments.map((segment, segmentIndex) => {
+                    if (segment.type === 'text') {
+                      return (
+                        <span key={`${message.id}-answer-${index}-text-${segmentIndex}`}>
+                          {segment.text}
+                        </span>
+                      )
+                    }
+
+                    const citation = result.citations.find((item) => item.label === segment.label)
+                    return citation
+                      ? renderCitationBadge(
+                          message,
+                          citation,
+                          activeCitation?.messageId === message.id && activeCitation.label === citation.label,
+                          onSelectCitation,
+                        )
+                      : null
+                  })}
+                </p>
               </div>
             ))}
           </div>
@@ -299,6 +382,7 @@ function renderAskState(
 
           {(expanded ? result.results : result.results.slice(0, 5)).map((resultItem) => (
             renderResultCard(
+              message,
               resultItem,
               onPreviewSource,
               onOpenSource,
@@ -327,9 +411,11 @@ export default function AssistantTranscript({
   messages,
   onOpenSource,
   onPreviewSource,
+  onSelectCitation,
   onRetryQuery,
   openSourcePendingId = null,
   previewSourcePendingId = null,
+  activeCitation = null,
 }: AssistantTranscriptProps) {
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({})
 
@@ -382,6 +468,8 @@ export default function AssistantTranscript({
                     onEditQuery,
                     onPreviewSource,
                     onOpenSource,
+                    onSelectCitation,
+                    activeCitation,
                     previewSourcePendingId,
                     openSourcePendingId,
                     () => {
@@ -450,6 +538,7 @@ export default function AssistantTranscript({
                         <div className="space-y-3">
                           {(expandedMessages[message.id] ? message.result.results : message.result.results.slice(0, 5)).map((result) => (
                             renderResultCard(
+                              message,
                               result,
                               onPreviewSource,
                               onOpenSource,

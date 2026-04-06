@@ -9,6 +9,11 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: 1024,
+  })
 })
 
 function renderAssistantPage() {
@@ -127,6 +132,21 @@ function buildGroundedAskQueryResponse() {
       title: 'Design Department Partners with Adobe for Creative Suite',
       source_kind: 'entry',
       snippet: 'Parul University has partnered with Adobe to provide Creative Suite access.',
+      source: {
+        asset_id: 'asset_1',
+        asset_version_id: 'asset_ver_1',
+        chunk_id: 'chunk_1',
+        entry_id: 'entry_1',
+        source_kind: 'entry',
+      },
+      actions: {
+        preview: {
+          available: true,
+        },
+        open_source: {
+          available: true,
+        },
+      },
       citation_locator: {
         asset_id: 'asset_1',
         asset_version_id: 'asset_ver_1',
@@ -666,7 +686,7 @@ describe('AIQueryPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
 
     expect((await screen.findAllByText('Entry preview')).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Open source detail').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Open source' })).not.toBeInTheDocument()
     expect(screen.getAllByText('Adobe Inc.').length).toBeGreaterThan(0)
   })
 
@@ -717,9 +737,98 @@ describe('AIQueryPage', () => {
 
     expect(await screen.findByText(/grounded answer/i)).toBeInTheDocument()
     expect(screen.getByText(/give 200 design students access to the full creative suite/i)).toBeInTheDocument()
-    expect(screen.getByLabelText('Citation S1: Design Department Partners with Adobe for Creative Suite')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Inspect citation S1 for Design Department Partners with Adobe for Creative Suite at Entry overview',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', {
+        name: 'Inspect citation S1 for Design Department Partners with Adobe for Creative Suite at Entry overview',
+      }).closest('p'),
+    ).not.toBeNull()
+    expect(
+      screen.getByRole('button', {
+        name: 'Inspect citation S1 for Design Department Partners with Adobe for Creative Suite at Entry overview',
+      }),
+    ).toHaveClass('min-w-11')
     expect(screen.getByText('Supporting sources')).toBeInTheDocument()
     expect(screen.getByText('Design Department Partners with Adobe for Creative Suite')).toBeInTheDocument()
+  })
+
+  it('opens citation evidence from citation focus and preserves the selected citation through preview actions', async () => {
+    vi.stubEnv('VITE_ASSISTANT_ENABLED', 'true')
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/assistant/health')) {
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            description: 'Entry-backed assistant services are connected.',
+          }),
+        }
+      }
+
+      if (url.endsWith('/assistant/query')) {
+        return {
+          ok: true,
+          json: async () => buildGroundedAskQueryResponse(),
+        }
+      }
+
+      if (url.endsWith('/assistant/source-preview')) {
+        return {
+          ok: true,
+          json: async () => buildAssistantPreviewResponse(),
+        }
+      }
+
+      throw new Error(`Unexpected fetch call for ${url}`)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAssistantPage()
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/assistant/health'),
+        expect.objectContaining({
+          credentials: 'include',
+        }),
+      )
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    const composer = screen.getByLabelText('Message assistant')
+    fireEvent.change(composer, { target: { value: 'Explain the Adobe partnership.' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    const citationButton = await screen.findByRole('button', {
+      name: 'Inspect citation S1 for Design Department Partners with Adobe for Creative Suite at Entry overview',
+    })
+
+    fireEvent.focus(citationButton)
+
+    expect((await screen.findAllByText('Selected citation')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('S1').length).toBeGreaterThan(0)
+    expect(screen.getByText('Locator')).toBeInTheDocument()
+    expect(screen.getByText('Entry overview')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Preview' }).length).toBeGreaterThan(1)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview' }).at(-1)!)
+
+    expect(await screen.findByText('Entry preview')).toBeInTheDocument()
+    expect(screen.getAllByText('Selected citation').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Design Department Partners with Adobe for Creative Suite').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    expect(screen.queryByText('Selected citation')).not.toBeInTheDocument()
+    expect(screen.queryByText('Entry preview')).not.toBeInTheDocument()
   })
 
   it('surfaces safe error copy when a source preview is denied', async () => {
@@ -933,7 +1042,7 @@ describe('AIQueryPage', () => {
     })
 
     await waitFor(() => {
-      expect(screen.queryByText('Open source detail')).not.toBeInTheDocument()
+      expect(screen.queryByText('Entry preview')).not.toBeInTheDocument()
     })
 
     expect(screen.queryByText('Entry preview')).not.toBeInTheDocument()

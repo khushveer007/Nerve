@@ -141,6 +141,8 @@ const assistantCitationSchema = z.object({
   title: z.string().min(1),
   source_kind: z.literal("entry"),
   snippet: z.string().min(1),
+  source: assistantSourceReferenceSchema,
+  actions: assistantResultActionsSchema,
   citation_locator: citationLocatorSchema,
 }).strict();
 

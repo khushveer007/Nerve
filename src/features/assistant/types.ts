@@ -88,7 +88,22 @@ export interface AssistantCitation {
   title: string
   source_kind: 'entry'
   snippet: string
+  source: AssistantSourceReference
+  actions: AssistantResultActions
   citation_locator: AssistantCitationLocator
+}
+
+export interface AssistantEvidenceSelection {
+  ownerMessageId: string
+  ownerRequestId: string
+  citation: AssistantCitation | null
+  relatedCitations: AssistantCitation[]
+  source: AssistantSourceReference
+  title: string
+  snippet: string
+  citationLocator: AssistantCitationLocator
+  metadata: AssistantEntryMetadata | null
+  actions: AssistantResultActions
 }
 
 export interface AssistantQueryResult {

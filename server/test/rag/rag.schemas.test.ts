@@ -44,6 +44,17 @@ describe("assistantQueryResultEnvelopeSchema", () => {
             title: "Medical College Gets NABH Accreditation",
             source_kind: "entry",
             snippet: "Parul Institute of Medical Sciences and Research has been granted NABH accreditation.",
+            source: {
+              asset_id: "asset_1",
+              asset_version_id: "asset_version_1",
+              chunk_id: "chunk_1",
+              entry_id: "entry_1",
+              source_kind: "entry",
+            },
+            actions: {
+              preview: { available: true },
+              open_source: { available: true },
+            },
             citation_locator: {
               asset_id: "asset_1",
               asset_version_id: "asset_version_1",

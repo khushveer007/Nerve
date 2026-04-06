@@ -1412,6 +1412,15 @@ describe("Story 1.2 RAG backend", () => {
     expect(result.grounded).toBe(true);
     expect(result.citations).toHaveLength(1);
     expect(result.citations[0]?.title).toBe(accessibleEntry.entry.title);
+    expect(result.citations[0]?.source).toMatchObject({
+      asset_id: accessibleEntry.asset.id,
+      entry_id: accessibleEntry.entry.id,
+      source_kind: "entry",
+    });
+    expect(result.citations[0]?.actions).toEqual({
+      preview: { available: true },
+      open_source: { available: true },
+    });
     expect(result.results.map((item) => item.title)).toContain(accessibleEntry.entry.title);
     expect(result.results.map((item) => item.title)).not.toContain(blockedEntry.entry.title);
     expect(result.answer).not.toContain("Hidden Design Standards Draft");

@@ -127,6 +127,7 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 7. Keep Phase 1 filters server-enforced inside `searchEntryKnowledge(...)`; the assistant shell now sends `department`, inclusive `date_range`, and `sort`, and transcript turns rely on `applied_filters` plus `total_results` coming back from the API
 8. Keep Ask-mode sufficiency gating deterministic and server-enforced before any answer-model call; weak or conflicting evidence must return an explainable abstention payload instead of unsupported prose
 9. Keep grounded answer generation behind the configured answer endpoint and constrain prompts to selected ACL-safe evidence only
+10. Keep citation inspection on the same trust boundary as result-card preview/open actions; grounded citations may include assistant-safe `source` and action metadata, but `/api/assistant/query`, `/api/assistant/source-preview`, and `/api/assistant/source-open` remain the only Phase 1 evidence endpoints
 
 ### Change auth or role behavior
 

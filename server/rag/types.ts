@@ -109,6 +109,8 @@ export interface AssistantCitation {
   title: string;
   source_kind: "entry";
   snippet: string;
+  source: AssistantSourceReference;
+  actions: AssistantResultActions;
   citation_locator: CitationLocator;
 }
 

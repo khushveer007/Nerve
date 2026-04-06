@@ -540,6 +540,14 @@ export async function generateGroundedAnswer(
         title: item.result.title,
         source_kind: "entry",
         snippet: item.result.snippet,
+        source: {
+          asset_id: item.result.asset_id,
+          asset_version_id: item.result.asset_version_id,
+          chunk_id: item.result.chunk_id,
+          entry_id: item.result.entry_id,
+          source_kind: "entry",
+        },
+        actions: item.result.actions,
         citation_locator: item.result.citation_locator,
       };
     }),

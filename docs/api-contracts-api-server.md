@@ -174,6 +174,21 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
         "title": "Medical College Gets NABH Accreditation",
         "source_kind": "entry",
         "snippet": "Parul Institute of Medical Sciences and Research has been granted NABH accreditation...",
+        "source": {
+          "asset_id": "asset_123",
+          "asset_version_id": "assetver_123",
+          "chunk_id": "chunk_123",
+          "entry_id": "e-001",
+          "source_kind": "entry"
+        },
+        "actions": {
+          "preview": {
+            "available": true
+          },
+          "open_source": {
+            "available": true
+          }
+        },
         "citation_locator": {
           "asset_id": "asset_123",
           "asset_version_id": "assetver_123",
@@ -240,6 +255,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
   - Phase 1 filters are `department`, inclusive `date_range.start` / `date_range.end`, and `sort` (`relevance` or `newest`).
   - `result.applied_filters` snapshots the normalized filters for that submitted turn so transcript history stays stable if the current session filters change later.
   - `result.total_results` reports the server-side match count before the response result array is truncated by `ASSISTANT_QUERY_RESULT_LIMIT`.
+  - Each grounded citation carries the same assistant-safe `source` reference plus `actions.preview` / `actions.open_source` availability used by `/api/assistant/source-preview` and `/api/assistant/source-open`, so citation clicks do not create a second trust path.
   - Retrieval uses an ACL-safe hybrid pipeline across metadata-aware exact matching, PostgreSQL full-text search, trigram similarity, and vector similarity when query embeddings are configured.
   - Ask-mode answer generation uses the configured Azure AI Foundry / OpenAI-compatible answer endpoint with `ASSISTANT_ANSWER_MODEL` defaulting to `gpt-4.1-mini`.
   - Ask-mode narrative generation is gated server-side. If evidence is weak or conflicting, the backend abstains before any answer-model call.
@@ -251,6 +267,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 - **Purpose:** Return the minimum permission-safe preview payload required for the assistant evidence/context surface.
 - **Auth:** Any authenticated user.
+- **Notes:** Citation-driven preview requests use the exact same `source` object shape returned on search results and grounded citations.
 - **Request Body:**
 
 ```json
@@ -303,6 +320,7 @@ The active backend exposes a compact REST API under `/api`. It uses cookie-based
 
 - **Purpose:** Resolve an authorized internal source-open target without exposing a public file or upload URL.
 - **Auth:** Any authenticated user.
+- **Notes:** Citation-driven open actions must reuse the assistant `source` reference from `/api/assistant/query`; clients should not invent a citation-only endpoint or bypass assistant ACL checks.
 - **Request Body:**
 
 ```json
