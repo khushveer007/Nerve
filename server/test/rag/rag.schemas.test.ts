@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAssistantFilterSummary,
+  classifyJobFailure,
+  classifyProviderFailureSubtype,
+} from "../../observability/helpers.js";
+import {
   assistantQueryEnvelopeSchema,
   assistantQueryResultEnvelopeSchema,
 } from "../../rag/schemas.js";
@@ -184,5 +189,50 @@ describe("assistantQueryResultEnvelopeSchema", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("assistant observability helpers", () => {
+  it("builds a filter summary without persisting raw query text", () => {
+    expect(buildAssistantFilterSummary({
+      department: "Design",
+      date_range: {
+        start: "2026-04-01",
+        end: null,
+      },
+      sort: "newest",
+    })).toEqual({
+      department: "Design",
+      sort: "newest",
+      has_date_start: true,
+      has_date_end: false,
+    });
+  });
+
+  it("classifies provider timeout and payload failures into stable subtypes", () => {
+    expect(classifyProviderFailureSubtype("embedding", new Error("Embedding request timed out."))).toBe(
+      "embedding_timeout",
+    );
+    expect(
+      classifyProviderFailureSubtype(
+        "answering",
+        new Error("Answer provider payload did not match the grounded answer schema."),
+      ),
+    ).toBe("answering_invalid_payload");
+  });
+
+  it("maps indexing provider failures separately from retrieval failures", () => {
+    expect(classifyJobFailure(new Error("Embedding request failed with status 503."))).toEqual({
+      classification: "provider_failure",
+      subtype: "embedding_http_error",
+    });
+    expect(classifyJobFailure(new Error("Embedding response payload was invalid."))).toEqual({
+      classification: "provider_failure",
+      subtype: "embedding_invalid_payload",
+    });
+    expect(classifyJobFailure(new Error("Entry entry-does-not-exist no longer exists."))).toEqual({
+      classification: "retrieval_failure",
+      subtype: "job_processing_failure",
+    });
   });
 });

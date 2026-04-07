@@ -100,6 +100,76 @@ async function getSourceReference(
   };
 }
 
+async function getLatestRequestTelemetry(
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  action: "query" | "source-preview" | "source-open" = "query",
+) {
+  const result = await runtime.modules.db.pool.query<{
+    request_id: string;
+    action: "query" | "source-preview" | "source-open";
+    outcome: string;
+    failure_classification: string;
+    failure_subtype: string | null;
+    authorization_outcome: string;
+    result_count: number;
+    citation_count: number;
+    grounded: boolean;
+    enough_evidence: boolean;
+    no_answer: boolean;
+    filter_summary: Record<string, unknown>;
+    stage_timings: Record<string, number>;
+    metadata: Record<string, unknown>;
+    provider_metadata: {
+      embeddings: { status: string; failure_subtype: string | null };
+      answering: { status: string; failure_subtype: string | null };
+    };
+  }>(
+    `SELECT
+      request_id,
+      action,
+      outcome,
+      failure_classification,
+      failure_subtype,
+      authorization_outcome,
+      result_count,
+      citation_count,
+      grounded,
+      enough_evidence,
+      no_answer,
+      filter_summary,
+      stage_timings,
+      metadata,
+      provider_metadata
+     FROM assistant_request_telemetry
+     WHERE action = $1
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [action],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function listJobTelemetryEvents(
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  jobId: string,
+) {
+  const result = await runtime.modules.db.pool.query<{
+    event_type: string;
+    status: string | null;
+    failure_classification: string;
+    failure_subtype: string | null;
+  }>(
+    `SELECT event_type, status, failure_classification, failure_subtype
+       FROM assistant_job_telemetry
+      WHERE job_id = $1
+      ORDER BY created_at ASC`,
+    [jobId],
+  );
+
+  return result.rows;
+}
+
 function buildAnswerProviderPayload(claims: Array<{ text: string; citations: string[] }>) {
   return {
     choices: [
@@ -129,7 +199,7 @@ describe("Story 1.2 RAG backend", () => {
     ]);
     await runtime.modules.ragDb.runRagMigrations();
 
-    expect(await runtime.modules.ragDb.getRagMigrationCount()).toBe(3);
+    expect(await runtime.modules.ragDb.getRagMigrationCount()).toBe(4);
 
     const tables = await runtime.modules.db.pool.query<{ table_name: string }>(
       `SELECT table_name
@@ -387,7 +457,7 @@ describe("Story 1.2 RAG backend", () => {
       )`,
     );
 
-    await runtime.modules.ragDb.enqueueReindexJob("asset-missing-entry", "entry-does-not-exist");
+    const queuedJob = await runtime.modules.ragDb.enqueueReindexJob("asset-missing-entry", "entry-does-not-exist");
     await runtime.modules.jobs.processNextKnowledgeJob("test-rag-worker");
     await runtime.modules.jobs.processNextKnowledgeJob("test-rag-worker");
 
@@ -406,6 +476,12 @@ describe("Story 1.2 RAG backend", () => {
     expect(jobStatus.rows[0]?.status).toBe("dead_letter");
     expect(jobStatus.rows[0]?.attempt_count).toBe(2);
     expect(jobStatus.rows[0]?.last_error).toContain("entry-does-not-exist");
+
+    const events = await listJobTelemetryEvents(runtime, queuedJob.id);
+    expect(events.map((event) => event.event_type)).toEqual(
+      expect.arrayContaining(["claimed", "retry", "dead_letter"]),
+    );
+    expect(events.some((event) => event.failure_classification === "retrieval_failure")).toBe(true);
   });
 
   it("continues queueing other entries when one startup backfill enqueue fails", async () => {
@@ -831,6 +907,12 @@ describe("Story 1.2 RAG backend", () => {
       expect(blockedPreviewPayload.message).toBe("You are not authorized to access that source.");
       expect(JSON.stringify(blockedPreviewPayload)).not.toContain("Explicit ACL Story 1.3 Result");
 
+      const blockedPreviewTelemetry = await getLatestRequestTelemetry(runtime, "source-preview");
+      expect(blockedPreviewTelemetry?.authorization_outcome).toBe("denied");
+      expect(blockedPreviewTelemetry?.outcome).toBe("permission_denied");
+      expect(blockedPreviewTelemetry?.failure_classification).toBe("permission_failure");
+      expect(blockedPreviewTelemetry?.metadata ?? {}).toEqual({});
+
       const blockedOpen = await fetch(`${baseUrl}/api/assistant/source-open`, {
         method: "POST",
         headers: {
@@ -848,6 +930,12 @@ describe("Story 1.2 RAG backend", () => {
       expect(blockedOpen.status).toBe(403);
       expect(blockedOpenPayload.message).toBe("You are not authorized to access that source.");
       expect(JSON.stringify(blockedOpenPayload)).not.toContain("Explicit ACL Story 1.3 Result");
+
+      const blockedOpenTelemetry = await getLatestRequestTelemetry(runtime, "source-open");
+      expect(blockedOpenTelemetry?.authorization_outcome).toBe("denied");
+      expect(blockedOpenTelemetry?.outcome).toBe("permission_denied");
+      expect(blockedOpenTelemetry?.failure_classification).toBe("permission_failure");
+      expect(blockedOpenTelemetry?.metadata ?? {}).toEqual({});
 
       const contentCookie = await loginAndGetSessionCookie(baseUrl, {
         email: "content-user@parul.ac.in",
@@ -920,6 +1008,14 @@ describe("Story 1.2 RAG backend", () => {
     expect(result.citations[0]?.title).toContain("NABH");
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.follow_up_suggestions[0]).toMatch(/supporting source/i);
+
+    const telemetry = await getLatestRequestTelemetry(runtime);
+    expect(telemetry?.request_id).toBe(result.request_id);
+    expect(telemetry?.outcome).toBe("grounded_answer");
+    expect(telemetry?.failure_classification).toBe("none");
+    expect(telemetry?.citation_count).toBe(1);
+    expect(telemetry?.provider_metadata.answering.status).toBe("succeeded");
+    expect(telemetry?.stage_timings.answer_generation_ms).toEqual(expect.any(Number));
   });
 
   it("routes sufficient synthesis-style auto queries to grounded ask answers", async () => {
@@ -1054,6 +1150,57 @@ describe("Story 1.2 RAG backend", () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.results[0]?.title).toContain("Adobe");
+  });
+
+  it("records provider degradation telemetry when query-time embeddings time out but lexical retrieval still succeeds", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ embedding: buildEmbedding(0) }],
+      }),
+    } as Response);
+
+    await createIndexedEntry(runtime, {
+      title: "Adobe Creative Suite Telemetry",
+      dept: "Design",
+      type: "Notice",
+      body: "Adobe Creative Suite telemetry reference for lexical fallback validation.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["adobe", "telemetry"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    fetchSpy.mockReset();
+    fetchSpy.mockRejectedValue(new Error("Embedding request timed out."));
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "search",
+      text: "Adobe Creative Suite",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.results[0]?.title).toContain("Adobe");
+
+    const telemetry = await getLatestRequestTelemetry(runtime);
+    expect(telemetry?.outcome).toBe("search_results");
+    expect(telemetry?.failure_classification).toBe("provider_failure");
+    expect(telemetry?.failure_subtype).toBe("embedding_timeout");
+    expect(telemetry?.provider_metadata.embeddings.status).toBe("degraded");
+    expect(telemetry?.provider_metadata.embeddings.failure_subtype).toBe("embedding_timeout");
+    expect(telemetry?.stage_timings.embeddings_ms).toEqual(expect.any(Number));
   });
 
   it("keeps ACL enforcement inside hybrid candidate generation when semantic retrieval is enabled", async () => {
@@ -1223,6 +1370,63 @@ describe("Story 1.2 RAG backend", () => {
     expect(result.enough_evidence).toBe(false);
     expect(result.results.length).toBeGreaterThanOrEqual(0);
     expect(result.follow_up_suggestions[0]).toMatch(/sources available to you/i);
+
+    const telemetry = await getLatestRequestTelemetry(runtime);
+    expect(telemetry?.outcome).toBe("no_answer");
+    expect(telemetry?.failure_classification).toBe("none");
+    expect(telemetry?.no_answer).toBe(true);
+    expect(telemetry?.stage_timings.evidence_assessment_ms).toEqual(expect.any(Number));
+  });
+
+  it("records provider fallback telemetry when grounded answer generation fails", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await createIndexedEntry(runtime, {
+      title: "Campus Safety Escalation Process",
+      dept: "Administration",
+      type: "Policy",
+      body: "Campus safety escalation process requires immediate control room notification and dean approval.",
+      priority: "High",
+      entry_date: "2026-04-06",
+      created_by: "ca-001",
+      tags: ["safety", "escalation"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const answeringModule = await import("../../rag/answering.js");
+    vi.spyOn(answeringModule, "assessGroundedAnswerEvidence").mockImplementation((_question, evidence) => ({
+      enoughEvidence: true,
+      reason: "sufficient",
+      evidence,
+    }));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Answer request timed out."));
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "ask",
+      text: "Explain the campus safety escalation process.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.answer).toBeNull();
+    expect(result.grounded).toBe(false);
+    expect(result.enough_evidence).toBe(true);
+    expect(result.follow_up_suggestions.join(" ")).toMatch(/temporarily unavailable/i);
+
+    const telemetry = await getLatestRequestTelemetry(runtime);
+    expect(telemetry?.outcome).toBe("provider_fallback");
+    expect(telemetry?.failure_classification).toBe("provider_failure");
+    expect(telemetry?.failure_subtype).toBe("answering_timeout");
+    expect(telemetry?.provider_metadata.answering.status).toBe("degraded");
+    expect(telemetry?.provider_metadata.answering.failure_subtype).toBe("answering_timeout");
   });
 
   it("abstains without calling the answer model when top evidence conflicts on a numeric answer", async () => {
@@ -1425,6 +1629,109 @@ describe("Story 1.2 RAG backend", () => {
     expect(result.results.map((item) => item.title)).not.toContain(blockedEntry.entry.title);
     expect(result.answer).not.toContain("Hidden Design Standards Draft");
     expect(result.follow_up_suggestions.join(" ")).not.toContain("Hidden Design Standards Draft");
+  });
+
+  it("records enqueue and success telemetry for reindex jobs", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const entry = await runtime.modules.db.createEntry({
+      title: "Telemetry Job Success",
+      dept: "Design",
+      type: "Notice",
+      body: "Telemetry job success body.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["telemetry-job"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const job = await runtime.modules.jobs.enqueueEntryReindex(entry.id);
+    expect(job).toBeTruthy();
+
+    await runtime.modules.jobs.processNextKnowledgeJob("test-rag-worker");
+
+    const events = await listJobTelemetryEvents(runtime, job!.id);
+    expect(events.map((event) => event.event_type)).toEqual(
+      expect.arrayContaining(["enqueue", "claimed", "succeeded"]),
+    );
+  });
+
+  it("records stale-lock recovery telemetry before reclaiming the job", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const entry = await runtime.modules.db.createEntry({
+      title: "Telemetry Stale Lock",
+      dept: "Design",
+      type: "Notice",
+      body: "Telemetry stale lock body.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["stale-lock"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const job = await runtime.modules.jobs.enqueueEntryReindex(entry.id);
+    expect(job).toBeTruthy();
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_jobs
+          SET status = 'running',
+              locked_at = NOW() - interval '2 hours',
+              worker_id = 'stale-worker',
+              attempt_count = 1
+        WHERE id = $1`,
+      [job!.id],
+    );
+
+    await runtime.modules.jobs.processNextKnowledgeJob("test-rag-worker");
+
+    const events = await listJobTelemetryEvents(runtime, job!.id);
+    expect(events.map((event) => event.event_type)).toContain("stale_lock_recovered");
+  });
+
+  it("keeps assistant responses intact when telemetry persistence fails open", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const originalQuery = runtime.modules.db.pool.query.bind(runtime.modules.db.pool);
+    vi.spyOn(runtime.modules.db.pool, "query").mockImplementation(((text: unknown, ...args: unknown[]) => {
+      if (typeof text === "string" && text.includes("INSERT INTO assistant_request_telemetry")) {
+        return Promise.reject(new Error("Telemetry storage unavailable."));
+      }
+
+      return originalQuery(text as never, ...(args as []));
+    }) as typeof runtime.modules.db.pool.query);
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "search",
+      text: "Adobe Creative Suite",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.results[0]?.title).toContain("Adobe");
   });
 
   it("applies department and inclusive date-range filters before shaping assistant results", async () => {

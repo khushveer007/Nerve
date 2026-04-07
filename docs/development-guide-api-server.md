@@ -128,6 +128,61 @@ This means local startup is stateful. Changes to the seed logic or bootstrap rul
 8. Keep Ask-mode sufficiency gating deterministic and server-enforced before any answer-model call; weak or conflicting evidence must return an explainable abstention payload instead of unsupported prose
 9. Keep grounded answer generation behind the configured answer endpoint and constrain prompts to selected ACL-safe evidence only
 10. Keep citation inspection on the same trust boundary as result-card preview/open actions; grounded citations may include assistant-safe `source` and action metadata, but `/api/assistant/query`, `/api/assistant/source-preview`, and `/api/assistant/source-open` remain the only Phase 1 evidence endpoints
+11. Keep operational telemetry fail-open and server-owned; `server/observability/*` may persist request and job signals, but telemetry writes must never replace the normal assistant result, no-answer, or `403` response
+
+## Assistant Telemetry And Failure Taxonomy
+
+Story 1.7 adds a lean Phase 1 observability layer for launch operations:
+
+- `assistant_request_telemetry` stores request-scoped signals for `/api/assistant/query`, `/api/assistant/source-preview`, and `/api/assistant/source-open`
+- `assistant_job_telemetry` stores enqueue, retry, dead-letter, stale-lock recovery, and success events for the existing `knowledge_jobs` lifecycle
+- `server/observability/metrics.ts` exposes typed write helpers plus read-side helpers such as `listRecentAssistantRequestTelemetry()` and `getAssistantOperationalSnapshot()`
+
+The top-level failure taxonomy is intentionally small:
+
+- `retrieval_failure`: corpus/search/evidence-loading failures that stop the request or job from completing normally
+- `permission_failure`: denied preview/open trust-boundary requests
+- `provider_failure`: embedding or answer-provider degradation, including graceful fallback paths
+- `none`: the request completed without an operational failure classification
+
+`no_answer` is an outcome, not a failure class. If evidence is insufficient or conflicting, telemetry should record `outcome = 'no_answer'` with `failure_classification = 'none'`.
+
+## Operational Inspection Workflow
+
+For a quick SQL-first inspection in local or production-like environments:
+
+```sql
+SELECT
+  request_id,
+  action,
+  outcome,
+  failure_classification,
+  failure_subtype,
+  result_count,
+  citation_count,
+  stage_timings,
+  provider_metadata,
+  created_at
+FROM assistant_request_telemetry
+ORDER BY created_at DESC
+LIMIT 25;
+```
+
+```sql
+SELECT
+  event_type,
+  status,
+  failure_classification,
+  failure_subtype,
+  latency_ms,
+  retry_delay_ms,
+  created_at
+FROM assistant_job_telemetry
+ORDER BY created_at DESC
+LIMIT 25;
+```
+
+For a code-level read model without building the later analytics UI, use `getAssistantOperationalSnapshot()` from [`server/observability/metrics.ts`](/home/opsa/Work/Nerve/server/observability/metrics.ts). It rolls up recent provider degradations, retrieval/permission failures, queue depth, dead-letter counts, and freshness-adjacent job/version age signals from the existing knowledge tables.
 
 ### Change auth or role behavior
 

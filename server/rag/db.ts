@@ -590,9 +590,9 @@ export async function enqueueReindexJob(assetId: string, sourceId: string) {
 }
 
 export async function recoverStaleKnowledgeJobs(staleAfterMs: number) {
-  if (staleAfterMs <= 0) return 0;
+  if (staleAfterMs <= 0) return [];
 
-  const result = await pool.query<{ count: number }>(
+  const result = await pool.query<KnowledgeJobRecord>(
     `WITH updated AS (
       UPDATE knowledge_jobs
          SET status = 'queued',
@@ -604,13 +604,13 @@ export async function recoverStaleKnowledgeJobs(staleAfterMs: number) {
        WHERE status = 'running'
          AND locked_at IS NOT NULL
          AND locked_at < NOW() - ($1::text)::interval
-       RETURNING 1
+       RETURNING *
     )
-    SELECT COUNT(*)::int AS count FROM updated`,
+    SELECT * FROM updated`,
     [`${Math.ceil(staleAfterMs / 1000)} seconds`],
   );
 
-  return result.rows[0]?.count ?? 0;
+  return result.rows.map(mapKnowledgeJob);
 }
 
 export async function claimNextKnowledgeJob(workerId: string) {
@@ -643,7 +643,7 @@ export async function claimNextKnowledgeJob(workerId: string) {
 }
 
 export async function markKnowledgeJobSucceeded(jobId: string, assetVersionId: string | null) {
-  await pool.query(
+  const result = await pool.query<KnowledgeJobRecord>(
     `UPDATE knowledge_jobs
         SET status = 'succeeded',
             asset_version_id = $2,
@@ -651,9 +651,12 @@ export async function markKnowledgeJobSucceeded(jobId: string, assetVersionId: s
             worker_id = NULL,
             last_error = NULL,
             updated_at = NOW()
-      WHERE id = $1`,
+      WHERE id = $1
+      RETURNING *`,
     [jobId, assetVersionId],
   );
+
+  return result.rows[0] ? mapKnowledgeJob(result.rows[0]) : null;
 }
 
 export async function markKnowledgeJobRetried(
@@ -663,7 +666,7 @@ export async function markKnowledgeJobRetried(
   retryDelayMs: number,
 ) {
   const intervalText = `${Math.max(0, Math.ceil(retryDelayMs / 1000))} seconds`;
-  await pool.query(
+  const result = await pool.query<KnowledgeJobRecord>(
     `UPDATE knowledge_jobs
         SET status = $2,
             locked_at = NULL,
@@ -674,9 +677,12 @@ export async function markKnowledgeJobRetried(
               ELSE NOW()
             END,
             updated_at = NOW()
-      WHERE id = $1`,
+      WHERE id = $1
+      RETURNING *`,
     [job.id, status, errorMessage, intervalText],
   );
+
+  return result.rows[0] ? mapKnowledgeJob(result.rows[0]) : null;
 }
 
 export async function listEntryIdsForBackfill() {

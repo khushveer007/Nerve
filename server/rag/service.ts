@@ -1,4 +1,16 @@
 import { randomUUID } from "node:crypto";
+import {
+  buildAssistantFilterSummary,
+  classifyProviderFailureSubtype,
+  createStageTimer,
+  defaultFailureDescriptor,
+  defaultProviderMetadata,
+  mergeFailureDescriptors,
+  permissionFailure,
+  providerFailure,
+  retrievalFailure,
+  safeRecordAssistantRequestTelemetry,
+} from "../observability/metrics.js";
 import { config } from "../config.js";
 import { buildAssistantSourceOpenPath } from "./acl.js";
 import {
@@ -19,6 +31,7 @@ import type {
   AssistantHealthResponse,
   AssistantQueryInput,
   AssistantQueryResult,
+  AssistantResolvedMode,
   AssistantSourceOpenResult,
   AssistantSourcePreviewResult,
   AssistantSourceReference,
@@ -91,115 +104,306 @@ async function loadGroundedAnswerEvidence(
   return previews.filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
+function buildSourceTelemetryMetadata(source: AssistantSourceReference) {
+  return {
+    source_kind: source.source_kind,
+    asset_id: source.asset_id,
+    asset_version_id: source.asset_version_id,
+    chunk_id: source.chunk_id,
+    entry_id: source.entry_id,
+  };
+}
+
 export async function executeAssistantQuery(
   actor: AssistantActorContext,
   input: AssistantQueryInput,
 ): Promise<AssistantQueryResult> {
-  const resolvedMode = resolveAssistantMode(input).mode;
   const requestId = randomUUID();
-  let queryEmbedding: string | null = null;
-
-  if (embeddingsEnabled()) {
-    try {
-      queryEmbedding = await embedQueryText(input.text);
-    } catch {
-      queryEmbedding = null;
-    }
-  }
-
-  const search = await searchEntryKnowledge({
-    actor,
-    queryText: input.text,
-    queryEmbedding,
-    queryEmbeddingMaxDistance: config.assistant.embeddings.maxQueryDistance,
-    filters: input.filters,
-    limit: config.assistant.queryResultLimit,
-  });
-
-  if (resolvedMode === "search") {
-    return {
-      mode: resolvedMode,
-      answer: null,
-      enough_evidence: search.totalCount > 0,
-      grounded: false,
-      citations: [],
-      applied_filters: input.filters,
-      total_results: search.totalCount,
-      results: search.results,
-      follow_up_suggestions: buildAskFollowUpSuggestions(
-        search.totalCount === 0 ? "no_results" : "search",
-        search.totalCount,
-      ),
-      request_id: requestId,
-    };
-  }
-
-  const answerEvidence = await loadGroundedAnswerEvidence(actor, search.results);
-  const assessment = assessGroundedAnswerEvidence(input.text, answerEvidence);
-
-  if (!assessment.enoughEvidence) {
-    return {
-      mode: resolvedMode,
-      answer: null,
-      enough_evidence: false,
-      grounded: false,
-      citations: [],
-      applied_filters: input.filters,
-      total_results: search.totalCount,
-      results: search.results,
-      follow_up_suggestions: buildAskFollowUpSuggestions(
-        assessment.reason === 'sufficient' ? 'weak_evidence' : assessment.reason,
-        search.totalCount,
-      ),
-      request_id: requestId,
-    };
-  }
-
-  if (!answerGenerationEnabled()) {
-    return {
-      mode: resolvedMode,
-      answer: null,
-      enough_evidence: true,
-      grounded: false,
-      citations: [],
-      applied_filters: input.filters,
-      total_results: search.totalCount,
-      results: search.results,
-      follow_up_suggestions: buildAskFollowUpSuggestions("answer_service_unavailable", search.totalCount),
-      request_id: requestId,
-    };
-  }
+  const timer = createStageTimer();
+  const providerMetadata = defaultProviderMetadata();
+  const filterSummary = buildAssistantFilterSummary(input.filters);
+  let failureDescriptor = defaultFailureDescriptor();
+  let resolvedMode: AssistantResolvedMode | null = null;
 
   try {
-    const groundedAnswer = await generateGroundedAnswer(input.text, assessment.evidence);
+    const resolution = await timer.measure("mode_resolution_ms", async () => resolveAssistantMode(input));
+    resolvedMode = resolution.mode;
 
-    return {
-      mode: resolvedMode,
-      answer: groundedAnswer.answer,
-      enough_evidence: true,
-      grounded: true,
-      citations: groundedAnswer.citations,
-      applied_filters: input.filters,
-      total_results: search.totalCount,
-      results: search.results,
-      follow_up_suggestions: groundedAnswer.followUpSuggestions,
-      request_id: requestId,
-    };
-  } catch {
-    return {
-      mode: resolvedMode,
-      answer: null,
-      enough_evidence: true,
+    let queryEmbedding: string | null = null;
+    if (embeddingsEnabled()) {
+      providerMetadata.embeddings.attempted = true;
+      try {
+        queryEmbedding = await timer.measure("embeddings_ms", async () => embedQueryText(input.text));
+        providerMetadata.embeddings.status = "succeeded";
+      } catch (error) {
+        const failureSubtype = classifyProviderFailureSubtype("embedding", error);
+        providerMetadata.embeddings.status = "degraded";
+        providerMetadata.embeddings.failure_subtype = failureSubtype;
+        failureDescriptor = mergeFailureDescriptors(failureDescriptor, providerFailure(failureSubtype));
+      }
+    }
+
+    const search = await timer.measure("retrieval_ms", async () => searchEntryKnowledge({
+      actor,
+      queryText: input.text,
+      queryEmbedding,
+      queryEmbeddingMaxDistance: config.assistant.embeddings.maxQueryDistance,
+      filters: input.filters,
+      limit: config.assistant.queryResultLimit,
+    }));
+
+    if (resolvedMode === "search") {
+      const result = {
+        mode: resolvedMode,
+        answer: null,
+        enough_evidence: search.totalCount > 0,
+        grounded: false,
+        citations: [],
+        applied_filters: input.filters,
+        total_results: search.totalCount,
+        results: search.results,
+        follow_up_suggestions: buildAskFollowUpSuggestions(
+          search.totalCount === 0 ? "no_results" : "search",
+          search.totalCount,
+        ),
+        request_id: requestId,
+      } satisfies AssistantQueryResult;
+
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "query",
+        actor,
+        requestedMode: input.mode,
+        resolvedMode,
+        authorizationOutcome: "allowed",
+        outcome: "search_results",
+        failureClassification: failureDescriptor.classification,
+        failureSubtype: failureDescriptor.subtype,
+        grounded: false,
+        enoughEvidence: result.enough_evidence,
+        noAnswer: false,
+        resultCount: search.totalCount,
+        citationCount: 0,
+        filterSummary,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {
+          returned_result_count: result.results.length,
+          zero_results: search.totalCount === 0,
+        },
+      });
+
+      return result;
+    }
+
+    const assessment = await timer.measure("evidence_assessment_ms", async () => {
+      const answerEvidence = await loadGroundedAnswerEvidence(actor, search.results);
+      return assessGroundedAnswerEvidence(input.text, answerEvidence);
+    });
+
+    if (!assessment.enoughEvidence) {
+      const result = {
+        mode: resolvedMode,
+        answer: null,
+        enough_evidence: false,
+        grounded: false,
+        citations: [],
+        applied_filters: input.filters,
+        total_results: search.totalCount,
+        results: search.results,
+        follow_up_suggestions: buildAskFollowUpSuggestions(
+          assessment.reason === "sufficient" ? "weak_evidence" : assessment.reason,
+          search.totalCount,
+        ),
+        request_id: requestId,
+      } satisfies AssistantQueryResult;
+
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "query",
+        actor,
+        requestedMode: input.mode,
+        resolvedMode,
+        authorizationOutcome: "allowed",
+        outcome: "no_answer",
+        failureClassification: failureDescriptor.classification,
+        failureSubtype: failureDescriptor.subtype,
+        grounded: false,
+        enoughEvidence: false,
+        noAnswer: true,
+        resultCount: search.totalCount,
+        citationCount: 0,
+        filterSummary,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {
+          assessment_reason: assessment.reason,
+          returned_result_count: result.results.length,
+        },
+      });
+
+      return result;
+    }
+
+    if (!answerGenerationEnabled()) {
+      const answerFailure = providerFailure("answer_provider_unavailable");
+      providerMetadata.answering.failure_subtype = answerFailure.subtype;
+
+      const result = {
+        mode: resolvedMode,
+        answer: null,
+        enough_evidence: true,
+        grounded: false,
+        citations: [],
+        applied_filters: input.filters,
+        total_results: search.totalCount,
+        results: search.results,
+        follow_up_suggestions: buildAskFollowUpSuggestions("answer_service_unavailable", search.totalCount),
+        request_id: requestId,
+      } satisfies AssistantQueryResult;
+
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "query",
+        actor,
+        requestedMode: input.mode,
+        resolvedMode,
+        authorizationOutcome: "allowed",
+        outcome: "provider_fallback",
+        failureClassification: answerFailure.classification,
+        failureSubtype: answerFailure.subtype,
+        grounded: false,
+        enoughEvidence: true,
+        noAnswer: false,
+        resultCount: search.totalCount,
+        citationCount: 0,
+        filterSummary,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {
+          returned_result_count: result.results.length,
+        },
+      });
+
+      return result;
+    }
+
+    providerMetadata.answering.attempted = true;
+
+    try {
+      const groundedAnswer = await timer.measure("answer_generation_ms", async () => (
+        generateGroundedAnswer(input.text, assessment.evidence)
+      ));
+      providerMetadata.answering.status = "succeeded";
+
+      const result = {
+        mode: resolvedMode,
+        answer: groundedAnswer.answer,
+        enough_evidence: true,
+        grounded: true,
+        citations: groundedAnswer.citations,
+        applied_filters: input.filters,
+        total_results: search.totalCount,
+        results: search.results,
+        follow_up_suggestions: groundedAnswer.followUpSuggestions,
+        request_id: requestId,
+      } satisfies AssistantQueryResult;
+
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "query",
+        actor,
+        requestedMode: input.mode,
+        resolvedMode,
+        authorizationOutcome: "allowed",
+        outcome: "grounded_answer",
+        failureClassification: failureDescriptor.classification,
+        failureSubtype: failureDescriptor.subtype,
+        grounded: true,
+        enoughEvidence: true,
+        noAnswer: false,
+        resultCount: search.totalCount,
+        citationCount: groundedAnswer.citations.length,
+        filterSummary,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {
+          returned_result_count: result.results.length,
+        },
+      });
+
+      return result;
+    } catch (error) {
+      const answerFailure = providerFailure(classifyProviderFailureSubtype("answering", error));
+      providerMetadata.answering.status = "degraded";
+      providerMetadata.answering.failure_subtype = answerFailure.subtype;
+
+      const result = {
+        mode: resolvedMode,
+        answer: null,
+        enough_evidence: true,
+        grounded: false,
+        citations: [],
+        applied_filters: input.filters,
+        total_results: search.totalCount,
+        results: search.results,
+        follow_up_suggestions: buildAskFollowUpSuggestions("answer_service_unavailable", search.totalCount),
+        request_id: requestId,
+      } satisfies AssistantQueryResult;
+
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "query",
+        actor,
+        requestedMode: input.mode,
+        resolvedMode,
+        authorizationOutcome: "allowed",
+        outcome: "provider_fallback",
+        failureClassification: answerFailure.classification,
+        failureSubtype: answerFailure.subtype,
+        grounded: false,
+        enoughEvidence: true,
+        noAnswer: false,
+        resultCount: search.totalCount,
+        citationCount: 0,
+        filterSummary,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {
+          returned_result_count: result.results.length,
+        },
+      });
+
+      return result;
+    }
+  } catch (error) {
+    const requestFailure = retrievalFailure("query_execution_failure");
+
+    await safeRecordAssistantRequestTelemetry({
+      requestId,
+      action: "query",
+      actor,
+      requestedMode: input.mode,
+      resolvedMode,
+      authorizationOutcome: "allowed",
+      outcome: "request_failed",
+      failureClassification: requestFailure.classification,
+      failureSubtype: requestFailure.subtype,
       grounded: false,
-      citations: [],
-      applied_filters: input.filters,
-      total_results: search.totalCount,
-      results: search.results,
-      follow_up_suggestions: buildAskFollowUpSuggestions("answer_service_unavailable", search.totalCount),
-      request_id: requestId,
-    };
-  }
+      enoughEvidence: false,
+      noAnswer: false,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary,
+      stageTimings: timer.snapshot(),
+      providerMetadata,
+      metadata: {
+        error_message: error instanceof Error ? error.message : "Assistant query failed.",
+      },
+    });
 
+    throw error;
+  }
 }
 
 function buildOpenTarget(source: AssistantSourceReference) {
@@ -214,43 +418,199 @@ export async function getAssistantSourcePreview(
   actor: AssistantActorContext,
   source: AssistantSourceReference,
 ): Promise<AssistantSourcePreviewResult> {
-  const preview = await getAuthorizedAssistantEntrySource({
-    actor,
-    source,
-  });
+  const requestId = randomUUID();
+  const timer = createStageTimer();
+  const providerMetadata = defaultProviderMetadata();
 
-  if (!preview) {
-    throw new AssistantAuthorizationError("You are not authorized to access that source.");
-  }
-
-  return {
-    preview: {
+  try {
+    const preview = await timer.measure("authorization_lookup_ms", async () => getAuthorizedAssistantEntrySource({
+      actor,
       source,
-      title: preview.title,
-      excerpt: preview.excerpt,
-      metadata: preview.metadata,
-      open_target: buildOpenTarget(source),
-    },
-  };
+    }));
+
+    if (!preview) {
+      const failure = permissionFailure("source_preview_denied");
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "source-preview",
+        actor,
+        requestedMode: null,
+        resolvedMode: null,
+        authorizationOutcome: "denied",
+        outcome: "permission_denied",
+        failureClassification: failure.classification,
+        failureSubtype: failure.subtype,
+        grounded: false,
+        enoughEvidence: false,
+        noAnswer: false,
+        resultCount: 0,
+        citationCount: 0,
+        filterSummary: null,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {},
+      });
+      throw new AssistantAuthorizationError("You are not authorized to access that source.");
+    }
+
+    await safeRecordAssistantRequestTelemetry({
+      requestId,
+      action: "source-preview",
+      actor,
+      requestedMode: null,
+      resolvedMode: null,
+      authorizationOutcome: "allowed",
+      outcome: "preview_served",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: false,
+      enoughEvidence: false,
+      noAnswer: false,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary: null,
+      stageTimings: timer.snapshot(),
+      providerMetadata,
+      metadata: buildSourceTelemetryMetadata(source),
+    });
+
+    return {
+      preview: {
+        source,
+        title: preview.title,
+        excerpt: preview.excerpt,
+        metadata: preview.metadata,
+        open_target: buildOpenTarget(source),
+      },
+    };
+  } catch (error) {
+    if (error instanceof AssistantAuthorizationError) {
+      throw error;
+    }
+
+    const failure = retrievalFailure("source_preview_failure");
+    await safeRecordAssistantRequestTelemetry({
+      requestId,
+      action: "source-preview",
+      actor,
+      requestedMode: null,
+      resolvedMode: null,
+      authorizationOutcome: "allowed",
+      outcome: "request_failed",
+      failureClassification: failure.classification,
+      failureSubtype: failure.subtype,
+      grounded: false,
+      enoughEvidence: false,
+      noAnswer: false,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary: null,
+      stageTimings: timer.snapshot(),
+      providerMetadata,
+      metadata: {
+        ...buildSourceTelemetryMetadata(source),
+        error_message: error instanceof Error ? error.message : "Assistant source preview failed.",
+      },
+    });
+    throw error;
+  }
 }
 
 export async function getAssistantSourceOpen(
   actor: AssistantActorContext,
   source: AssistantSourceReference,
 ): Promise<AssistantSourceOpenResult> {
-  const authorizedSource = await getAuthorizedAssistantEntrySource({
-    actor,
-    source,
-  });
+  const requestId = randomUUID();
+  const timer = createStageTimer();
+  const providerMetadata = defaultProviderMetadata();
 
-  if (!authorizedSource) {
-    throw new AssistantAuthorizationError("You are not authorized to access that source.");
-  }
-
-  return {
-    open: {
+  try {
+    const authorizedSource = await timer.measure("authorization_lookup_ms", async () => getAuthorizedAssistantEntrySource({
+      actor,
       source,
-      target: buildOpenTarget(source),
-    },
-  };
+    }));
+
+    if (!authorizedSource) {
+      const failure = permissionFailure("source_open_denied");
+      await safeRecordAssistantRequestTelemetry({
+        requestId,
+        action: "source-open",
+        actor,
+        requestedMode: null,
+        resolvedMode: null,
+        authorizationOutcome: "denied",
+        outcome: "permission_denied",
+        failureClassification: failure.classification,
+        failureSubtype: failure.subtype,
+        grounded: false,
+        enoughEvidence: false,
+        noAnswer: false,
+        resultCount: 0,
+        citationCount: 0,
+        filterSummary: null,
+        stageTimings: timer.snapshot(),
+        providerMetadata,
+        metadata: {},
+      });
+      throw new AssistantAuthorizationError("You are not authorized to access that source.");
+    }
+
+    await safeRecordAssistantRequestTelemetry({
+      requestId,
+      action: "source-open",
+      actor,
+      requestedMode: null,
+      resolvedMode: null,
+      authorizationOutcome: "allowed",
+      outcome: "source_opened",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: false,
+      enoughEvidence: false,
+      noAnswer: false,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary: null,
+      stageTimings: timer.snapshot(),
+      providerMetadata,
+      metadata: buildSourceTelemetryMetadata(source),
+    });
+
+    return {
+      open: {
+        source,
+        target: buildOpenTarget(source),
+      },
+    };
+  } catch (error) {
+    if (error instanceof AssistantAuthorizationError) {
+      throw error;
+    }
+
+    const failure = retrievalFailure("source_open_failure");
+    await safeRecordAssistantRequestTelemetry({
+      requestId,
+      action: "source-open",
+      actor,
+      requestedMode: null,
+      resolvedMode: null,
+      authorizationOutcome: "allowed",
+      outcome: "request_failed",
+      failureClassification: failure.classification,
+      failureSubtype: failure.subtype,
+      grounded: false,
+      enoughEvidence: false,
+      noAnswer: false,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary: null,
+      stageTimings: timer.snapshot(),
+      providerMetadata,
+      metadata: {
+        ...buildSourceTelemetryMetadata(source),
+        error_message: error instanceof Error ? error.message : "Assistant source open failed.",
+      },
+    });
+    throw error;
+  }
 }
