@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { config } from "../config.js";
-import { buildGroundedAnswerMessages } from "./prompts.js";
+import {
+  buildGroundedAnswerMessages,
+  buildGroundedAnswerResponsePrompt,
+} from "./prompts.js";
 import type {
   AssistantCitation,
   AssistantEntrySearchResult,
@@ -136,6 +139,15 @@ function buildAnswerHeaders() {
   }
 
   return headers;
+}
+
+function usesResponsesApi(url: string) {
+  try {
+    const parsed = new URL(url);
+    return /\/responses\/?$/.test(parsed.pathname);
+  } catch {
+    return /\/responses(?:\?|$)/.test(url);
+  }
 }
 
 function extractQueryTerms(question: string) {
@@ -467,26 +479,38 @@ export async function generateGroundedAnswer(
 
   let response: Response;
   try {
-    response = await fetch(config.assistant.answering.url, {
-      method: "POST",
-      headers: buildAnswerHeaders(),
-      body: JSON.stringify({
+    const promptEvidence = evidence.map((item) => ({
+      label: item.label,
+      title: item.result.title,
+      snippet: item.result.snippet,
+      excerpt: item.excerpt,
+      department: item.result.metadata.dept,
+      entryDate: item.result.metadata.entry_date,
+      authorName: item.result.metadata.author_name,
+      citationPath: item.result.citation_locator.heading_path,
+    }));
+    const requestBody = usesResponsesApi(config.assistant.answering.url)
+      ? (() => {
+        const prompt = buildGroundedAnswerResponsePrompt(question, promptEvidence);
+        return {
+          model: config.assistant.answering.model,
+          instructions: prompt.instructions,
+          input: prompt.input,
+        };
+      })()
+      : {
         model: config.assistant.answering.model,
         temperature: 0,
         response_format: {
           type: "json_object",
         },
-        messages: buildGroundedAnswerMessages(question, evidence.map((item) => ({
-          label: item.label,
-          title: item.result.title,
-          snippet: item.result.snippet,
-          excerpt: item.excerpt,
-          department: item.result.metadata.dept,
-          entryDate: item.result.metadata.entry_date,
-          authorName: item.result.metadata.author_name,
-          citationPath: item.result.citation_locator.heading_path,
-        }))),
-      }),
+        messages: buildGroundedAnswerMessages(question, promptEvidence),
+      };
+
+    response = await fetch(config.assistant.answering.url, {
+      method: "POST",
+      headers: buildAnswerHeaders(),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
   } catch (error) {

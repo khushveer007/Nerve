@@ -9,7 +9,25 @@ export interface GroundedAnswerPromptEvidence {
   citationPath: string[];
 }
 
-export function buildGroundedAnswerMessages(question: string, evidence: GroundedAnswerPromptEvidence[]) {
+function buildGroundedAnswerSystemPrompt() {
+  return [
+    "You are a grounded answer generator for the Nerve assistant.",
+    "Use only the supplied evidence.",
+    "Do not add facts, background knowledge, or speculation.",
+    "Return valid JSON with this shape:",
+    "{",
+    '  "claims": [{ "text": "string", "citations": ["S1"] }],',
+    '  "follow_up_suggestions": ["string"]',
+    "}",
+    "Rules:",
+    "- Provide 1 to 3 concise claims.",
+    "- Every claim must cite one or more evidence labels.",
+    "- Only cite labels that were supplied in the evidence list.",
+    "- Keep follow-up suggestions short and practical.",
+  ].join("\n");
+}
+
+function buildGroundedAnswerUserPrompt(question: string, evidence: GroundedAnswerPromptEvidence[]) {
   const serializedEvidence = evidence.map((item) => [
     `${item.label}: ${item.title}`,
     `Department: ${item.department}`,
@@ -21,32 +39,32 @@ export function buildGroundedAnswerMessages(question: string, evidence: Grounded
   ].join("\n")).join("\n\n");
 
   return [
+    `Question: ${question}`,
+    "",
+    "Evidence:",
+    serializedEvidence,
+  ].join("\n");
+}
+
+export function buildGroundedAnswerMessages(question: string, evidence: GroundedAnswerPromptEvidence[]) {
+  const systemPrompt = buildGroundedAnswerSystemPrompt();
+  const userPrompt = buildGroundedAnswerUserPrompt(question, evidence);
+
+  return [
     {
       role: "system",
-      content: [
-        "You are a grounded answer generator for the Nerve assistant.",
-        "Use only the supplied evidence.",
-        "Do not add facts, background knowledge, or speculation.",
-        "Return valid JSON with this shape:",
-        "{",
-        '  "claims": [{ "text": "string", "citations": ["S1"] }],',
-        '  "follow_up_suggestions": ["string"]',
-        "}",
-        "Rules:",
-        "- Provide 1 to 3 concise claims.",
-        "- Every claim must cite one or more evidence labels.",
-        "- Only cite labels that were supplied in the evidence list.",
-        "- Keep follow-up suggestions short and practical.",
-      ].join("\n"),
+      content: systemPrompt,
     },
     {
       role: "user",
-      content: [
-        `Question: ${question}`,
-        "",
-        "Evidence:",
-        serializedEvidence,
-      ].join("\n"),
+      content: userPrompt,
     },
   ];
+}
+
+export function buildGroundedAnswerResponsePrompt(question: string, evidence: GroundedAnswerPromptEvidence[]) {
+  return {
+    instructions: buildGroundedAnswerSystemPrompt(),
+    input: buildGroundedAnswerUserPrompt(question, evidence),
+  };
 }

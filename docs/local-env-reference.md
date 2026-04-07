@@ -89,6 +89,7 @@ These settings control grounded Ask-mode answer generation.
 - Required for real grounded generated answers.
 - Not required for search mode.
 - If you set `ASSISTANT_ANSWER_API_KEY`, you should also set `ASSISTANT_ANSWER_URL`. The local script validates this.
+- The current server supports both chat-completions-style answer endpoints and Responses API endpoints. If the URL ends with `/responses`, the server sends `instructions` plus `input` instead of `messages`.
 
 ## Worker And Reindexing Controls
 

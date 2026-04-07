@@ -1109,6 +1109,60 @@ describe("Story 1.2 RAG backend", () => {
     expect(telemetry?.stage_timings.answer_generation_ms).toEqual(expect.any(Number));
   });
 
+  it("supports grounded ask answer generation through responses-style endpoints", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/responses",
+      ASSISTANT_ANSWER_API_HEADER: "api-key",
+      ASSISTANT_ANSWER_AUTH_SCHEME: "",
+      ASSISTANT_ANSWER_API_KEY: "responses-secret",
+      ASSISTANT_ANSWER_MODEL: "gpt-5.4-mini",
+    });
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+    await runtime.modules.jobs.enqueueEntryBackfill();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(buildJsonResponse({
+      output_text: JSON.stringify({
+        claims: [
+          {
+            text: "The medical college has NABH accreditation for patient care, infrastructure, and clinical outcomes.",
+            citations: ["S1"],
+          },
+        ],
+        follow_up_suggestions: [
+          "Open a supporting source below if you want to verify the cited entry evidence.",
+        ],
+      }),
+    }));
+
+    const result = await runtime.modules.service.executeAssistantQuery(SUPER_ADMIN_ACTOR, {
+      mode: "ask",
+      text: "Summarize what Nerve says about NABH accreditation.",
+      filters: EMPTY_FILTERS,
+    });
+
+    expect(result.mode).toBe("ask");
+    expect(result.grounded).toBe(true);
+    expect(result.answer).toContain("[S1]");
+    expect(result.citations).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const [, init] = fetchSpy.mock.calls[0]!;
+    expect(init?.headers).toMatchObject({
+      "Content-Type": "application/json",
+      "api-key": "responses-secret",
+    });
+
+    const requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(requestBody.model).toBe("gpt-5.4-mini");
+    expect(requestBody.instructions).toEqual(expect.any(String));
+    expect(requestBody.input).toEqual(expect.any(String));
+    expect(requestBody).not.toHaveProperty("messages");
+  });
+
   it("routes sufficient synthesis-style auto queries to grounded ask answers", async () => {
     const runtime = await createTestRuntime({
       ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
