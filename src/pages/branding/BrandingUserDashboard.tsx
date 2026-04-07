@@ -15,6 +15,7 @@ import {
   Camera, Shield, BookOpen, Keyboard, MessageCircle, Phone,
 } from 'lucide-react'
 import BrandingBrowse from './BrandingBrowse'
+import BrandingTeamPanel from './BrandingTeamPanel'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell,
@@ -53,7 +54,7 @@ const PIE_COLORS = [
   '#3D9970', // jade green
 ]
 
-type NavPage = 'dashboard' | 'daily-reports' | 'analytics' | 'self-appraisal' | 'gallery' | 'settings' | 'help'
+type NavPage = 'dashboard' | 'daily-reports' | 'analytics' | 'self-appraisal' | 'gallery' | 'team' | 'settings' | 'help'
 
 function blankRow(sr: number): DraftRow {
   return { _key: `${Date.now()}-${sr}`, sr_no: sr, type_of_work: '', sub_category: '', specific_work: '', time_taken: '', collaborative_colleagues: [] }
@@ -3108,7 +3109,7 @@ function SelfAppraisalPage({
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function BrandingUserDashboard() {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, role } = useAuth()
   const { users } = useAppData()
   const [activePage, setActivePage] = useState<NavPage>('dashboard')
 
@@ -3188,6 +3189,7 @@ export default function BrandingUserDashboard() {
     { key: 'analytics', icon: BarChart2, label: 'Analytics' },
     { key: 'self-appraisal', icon: Award, label: 'Self Appraisal' },
     { key: 'gallery', icon: LayoutGrid, label: 'Design Gallery' },
+    ...(role === 'sub_admin' ? [{ key: 'team' as NavPage, icon: Users, label: 'My Team' }] : []),
   ]
 
   return (
@@ -3362,6 +3364,7 @@ export default function BrandingUserDashboard() {
             <SelfAppraisalPage profile={profile} users={users} />
           )}
           {activePage === 'gallery' && <BrandingBrowse />}
+          {activePage === 'team' && <BrandingTeamPanel />}
           {activePage === 'settings' && <SettingsPage profile={profile} />}
           {activePage === 'help' && <HelpPage onNavigate={setActivePage} />}
         </main>

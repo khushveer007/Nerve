@@ -911,7 +911,10 @@ app.get("/api/branding/portal/team/report-status", asyncHandler(async (req, res)
   if (!requireBrandingLead(res)) return;
   const date = getSingleParam((req.query as Record<string, string>).date ?? "");
   if (!date) return sendError(res, 400, "date query param required (YYYY-MM-DD).");
-  const statuses = await getTeamReportStatus(date);
+  const u = res.locals.currentUser;
+  // sub_admin sees only their own managed members; admin/super_admin sees everyone
+  const managedBy = u.role === "sub_admin" ? u.id : null;
+  const statuses = await getTeamReportStatus(date, managedBy);
   res.json({ statuses });
 }));
 
