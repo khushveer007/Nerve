@@ -94,6 +94,7 @@ export async function createTestRuntime(envOverrides: Record<string, string> = {
   const ragDbModule = await import("../../rag/db.js");
   const jobsModule = await import("../../rag/jobs.js");
   const serviceModule = await import("../../rag/service.js");
+  const metricsModule = await import("../../observability/metrics.js");
 
   async function cleanup() {
     await dbModule.pool.end();
@@ -127,6 +128,7 @@ export async function createTestRuntime(envOverrides: Record<string, string> = {
       ragDb: ragDbModule,
       jobs: jobsModule,
       service: serviceModule,
+      metrics: metricsModule,
     },
   };
 }

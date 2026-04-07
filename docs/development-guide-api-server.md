@@ -22,6 +22,8 @@ These must be present or the server will fail at startup:
 - `SESSION_SECRET`
 - `SUPER_ADMIN_PASSWORD`
 
+For a variable-by-variable explanation of the local stack, see [local-env-reference.md](./local-env-reference.md).
+
 Useful defaults or optional values:
 
 - `API_PORT` defaults to `3001`
@@ -60,6 +62,37 @@ docker compose up -d db api worker
 ```
 
 If the API itself runs in Docker, its `DATABASE_URL` should target the Compose service host (`db`) rather than `127.0.0.1`.
+
+### Option 3: Run `dev:local` for feature testing with real providers
+
+The repo includes a local-debug path in [dev-local.sh](../scripts/dev-local.sh). This is the recommended way to test new assistant features with real embedding and answer-provider credentials while still keeping the app and worker easy to debug.
+
+```bash
+npm ci
+cp .env.local.example .env.local
+npm run dev:local
+```
+
+`npm run dev:local` will:
+
+- start PostgreSQL in Docker and publish it on `127.0.0.1:5432`
+- source `.env.local`
+- validate the assistant provider configuration before boot
+- print whether embeddings and grounded answer generation are enabled
+- start the API, worker, and Vite frontend together
+
+For real provider testing, fill these values in `.env.local`:
+
+- `ASSISTANT_EMBEDDING_URL`
+- `ASSISTANT_EMBEDDING_API_KEY`
+- `ASSISTANT_EMBEDDING_MODEL`
+- `ASSISTANT_ANSWER_URL`
+- `ASSISTANT_ANSWER_API_KEY`
+- `ASSISTANT_ANSWER_MODEL`
+
+Keep `ASSISTANT_EMBEDDING_DIMENSIONS=1536`. The current `knowledge_chunks.embedding` schema depends on that dimension, and the local dev script now fails fast if it is changed.
+
+If `ASSISTANT_EMBEDDING_URL` is left empty, retrieval stays lexical-only. If `ASSISTANT_ANSWER_URL` is left empty, Ask mode can still run but will not produce grounded generated answers.
 
 ## Build And Runtime Commands
 
@@ -182,7 +215,57 @@ ORDER BY created_at DESC
 LIMIT 25;
 ```
 
-For a code-level read model without building the later analytics UI, use `getAssistantOperationalSnapshot()` from [`server/observability/metrics.ts`](/home/opsa/Work/Nerve/server/observability/metrics.ts). It rolls up recent provider degradations, retrieval/permission failures, queue depth, dead-letter counts, and freshness-adjacent job/version age signals from the existing knowledge tables.
+For a code-level read model without building the later analytics UI, use `getAssistantOperationalSnapshot()` from [`server/observability/metrics.ts`](../server/observability/metrics.ts). It rolls up recent provider degradations, retrieval/permission failures, queue depth, dead-letter counts, and freshness-adjacent job/version age signals from the existing knowledge tables.
+
+## Phase 1 Launch Evaluation
+
+Story 1.8 adds a deterministic launch-quality gate on top of the existing entry-backed assistant suite. It is still server-first: no public dashboard, no client analytics surface, and no duplicate evaluation datastore.
+
+Run the launch guardrails with:
+
+```bash
+TEST_DATABASE_URL=postgres://nerve_app:replace-with-db-password@127.0.0.1:5432/postgres \
+  npm run test:server -- server/test/rag/rag.integration.test.ts -t "launch-quality gate:"
+```
+
+Use the same host, port, user, and password as the reachable PostgreSQL instance behind your local setup. With `npm run dev:local`, that host is `127.0.0.1:5432`, and the test runtime creates an isolated ephemeral database for each run.
+
+The launch suite covers:
+
+- exact-match entry search staying discoverable in the top results
+- semantic retrieval when wording diverges from the stored entry text
+- grounded-answer turns that must emit citations on substantive answers
+- correct `no_answer` abstention when evidence is weak or conflicting
+- ACL-sensitive query, preview, and open flows without blocked-source metadata leakage
+
+To inspect the telemetry-backed launch summary directly from the server read model, run:
+
+```bash
+npx tsx --eval 'import { getAssistantLaunchSummary } from "./server/observability/metrics.ts";
+const summary = await getAssistantLaunchSummary({ hours: 24 });
+console.log(JSON.stringify(summary, null, 2));'
+```
+
+`getAssistantLaunchSummary()` reuses `assistant_request_telemetry` and reports:
+
+- citation coverage for grounded answers
+- no-answer rate across ask-path requests
+- search-versus-ask request mix
+- p95 latency for search and ask paths compared with the Phase 1 targets
+- denied source-preview/source-open counts and other request outcomes
+
+Interpret the latency targets as:
+
+- search path p95 should stay at or below `2500` ms
+- grounded/ask path p95 should stay at or below `8000` ms
+
+Treat these outcomes as launch blockers until remediated and tracked with follow-up work:
+
+- blocked-source leakage through query results, citations, preview payloads, or open payloads
+- unsupported narrative answers where the assistant should have abstained
+- substantive grounded answers that ship without citation coverage
+- search path p95 latency above `2500` ms in the launch telemetry summary
+- grounded/ask path p95 latency above `8000` ms in the launch telemetry summary
 
 ### Change auth or role behavior
 

@@ -15,6 +15,54 @@ WEB_PID=""
 DB_CONTAINER_ID=""
 CLEANUP_WATCHER_PID=""
 
+has_value() {
+  local value="${1:-}"
+  [ -n "${value// }" ]
+}
+
+validate_local_assistant_config() {
+  if has_value "${ASSISTANT_EMBEDDING_DIMENSIONS:-}" && [ "${ASSISTANT_EMBEDDING_DIMENSIONS}" != "1536" ]; then
+    echo "ASSISTANT_EMBEDDING_DIMENSIONS must stay set to 1536 for local dev." >&2
+    exit 1
+  fi
+
+  if has_value "${ASSISTANT_EMBEDDING_API_KEY:-}" && ! has_value "${ASSISTANT_EMBEDDING_URL:-}"; then
+    echo "ASSISTANT_EMBEDDING_API_KEY is set but ASSISTANT_EMBEDDING_URL is empty." >&2
+    exit 1
+  fi
+
+  if has_value "${ASSISTANT_ANSWER_API_KEY:-}" && ! has_value "${ASSISTANT_ANSWER_URL:-}"; then
+    echo "ASSISTANT_ANSWER_API_KEY is set but ASSISTANT_ANSWER_URL is empty." >&2
+    exit 1
+  fi
+}
+
+print_local_assistant_summary() {
+  local embedding_mode="disabled"
+  local answer_mode="disabled"
+
+  if has_value "${ASSISTANT_EMBEDDING_URL:-}"; then
+    embedding_mode="enabled (${ASSISTANT_EMBEDDING_MODEL:-text-embedding-3-small})"
+  fi
+
+  if has_value "${ASSISTANT_ANSWER_URL:-}"; then
+    answer_mode="enabled (${ASSISTANT_ANSWER_MODEL:-gpt-4.1-mini})"
+  fi
+
+  echo "Assistant local-dev configuration:"
+  echo "  RAG enabled: ${ASSISTANT_RAG_ENABLED:-true}"
+  echo "  Embeddings: $embedding_mode"
+  echo "  Answer generation: $answer_mode"
+
+  if ! has_value "${ASSISTANT_EMBEDDING_URL:-}"; then
+    echo "  Note: retrieval will stay lexical-only until ASSISTANT_EMBEDDING_URL is configured."
+  fi
+
+  if ! has_value "${ASSISTANT_ANSWER_URL:-}"; then
+    echo "  Note: Ask mode will abstain or fall back without grounded answer generation until ASSISTANT_ANSWER_URL is configured."
+  fi
+}
+
 cleanup() {
   local exit_code=$?
 
@@ -105,6 +153,9 @@ wait_for_db
 set -a
 source "$ENV_FILE"
 set +a
+
+validate_local_assistant_config
+print_local_assistant_summary
 
 start_db_cleanup_watcher "$$"
 

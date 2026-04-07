@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CreateEntryInput } from "../../db.js";
+import type { AssistantLaunchSummary } from "../../observability/types.js";
 import type { AssistantQueryFilters } from "../../rag/types.js";
 import {
   createTestRuntime,
@@ -8,6 +9,8 @@ import {
   startHttpServer,
   stopHttpServer,
 } from "./test-utils.js";
+
+type TestRuntime = Awaited<ReturnType<typeof createTestRuntime>>;
 
 const cleanups: Array<() => Promise<void>> = [];
 const EMPTY_FILTERS: AssistantQueryFilters = {
@@ -41,7 +44,7 @@ function buildEmbedding(index: number) {
 }
 
 async function setAssetEmbedding(
-  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  runtime: TestRuntime,
   assetId: string,
   embedding: number[],
 ) {
@@ -54,7 +57,7 @@ async function setAssetEmbedding(
 }
 
 async function createIndexedEntry(
-  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  runtime: TestRuntime,
   input: CreateEntryInput,
 ) {
   const entry = await runtime.modules.db.createEntry(input);
@@ -70,7 +73,7 @@ async function createIndexedEntry(
 }
 
 async function getSourceReference(
-  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  runtime: TestRuntime,
   assetId: string,
   entryId: string,
 ) {
@@ -101,7 +104,7 @@ async function getSourceReference(
 }
 
 async function getLatestRequestTelemetry(
-  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  runtime: TestRuntime,
   action: "query" | "source-preview" | "source-open" = "query",
 ) {
   const result = await runtime.modules.db.pool.query<{
@@ -150,8 +153,96 @@ async function getLatestRequestTelemetry(
   return result.rows[0] ?? null;
 }
 
+function buildJsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function resolveMockEmbeddingIndex(text: string) {
+  const normalized = text.toLowerCase();
+
+  if (
+    normalized.includes("aurora")
+    || normalized.includes("semantic-aurora-intent")
+    || normalized.includes("lumen graph ember slate")
+  ) {
+    return 0;
+  }
+
+  if (
+    normalized.includes("orchard")
+    || normalized.includes("pebble harbor mint lantern")
+  ) {
+    return 1;
+  }
+
+  return 2;
+}
+
+async function postJson<TResponse>(
+  baseUrl: string,
+  path: string,
+  cookie: string,
+  body: unknown,
+) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json() as TResponse;
+
+  return {
+    response,
+    payload,
+  };
+}
+
+function buildLaunchEvaluationSummary(
+  metrics: AssistantLaunchSummary,
+  scenarios: Array<{ category: string; passed: boolean; blocker: string }>,
+) {
+  const blockers = scenarios
+    .filter((scenario) => !scenario.passed)
+    .map((scenario) => scenario.blocker);
+
+  if (
+    metrics.quality_metrics.citation_coverage_rate !== null
+    && metrics.quality_metrics.citation_coverage_rate < 1
+  ) {
+    blockers.push("Grounded answers are missing citation coverage in the launch telemetry summary.");
+  }
+
+  if (metrics.latency.search.within_target === false) {
+    blockers.push(
+      `Launch telemetry summary shows search p95 latency ${metrics.latency.search.p95_ms} ms above target ${metrics.latency.search.target_ms} ms.`,
+    );
+  }
+
+  if (metrics.latency.ask.within_target === false) {
+    blockers.push(
+      `Launch telemetry summary shows ask p95 latency ${metrics.latency.ask.p95_ms} ms above target ${metrics.latency.ask.target_ms} ms.`,
+    );
+  }
+
+  return {
+    launch_ready: blockers.length === 0,
+    blockers,
+    scenarios,
+    metrics,
+  };
+}
+
 async function listJobTelemetryEvents(
-  runtime: Awaited<ReturnType<typeof createTestRuntime>>,
+  runtime: TestRuntime,
   jobId: string,
 ) {
   const result = await runtime.modules.db.pool.query<{
@@ -656,7 +747,7 @@ describe("Story 1.2 RAG backend", () => {
       const blockedPayload = await blockedResponse.json() as {
         result: {
           results: Array<{ title: string }>;
-          citations: Array<{ title: string }>;
+          citations?: Array<{ title: string }>;
         };
       };
 
@@ -691,7 +782,7 @@ describe("Story 1.2 RAG backend", () => {
       const allowedPayload = await allowedResponse.json() as {
         result: {
           results: Array<{ title: string; snippet: string }>;
-          citations: Array<{ title: string }>;
+          citations?: Array<{ title: string }>;
         };
       };
 
@@ -699,7 +790,7 @@ describe("Story 1.2 RAG backend", () => {
       expect(allowedPayload.result.results).toHaveLength(1);
       expect(allowedPayload.result.results[0]?.title).toContain("Team Scope Story 1.3 Result");
       expect(allowedPayload.result.results[0]?.snippet).toContain("ACL validation");
-      expect(allowedPayload.result.citations).toHaveLength(1);
+      expect(allowedPayload.result.citations ?? []).toHaveLength(0);
     } finally {
       await stopHttpServer(server);
     }
@@ -965,7 +1056,7 @@ describe("Story 1.2 RAG backend", () => {
       expect(allowedPreview.ok).toBe(true);
       expect(allowedPreviewPayload.preview.title).toContain("Explicit ACL Story 1.3 Result");
       expect(allowedPreviewPayload.preview.excerpt).toContain("preview and open validation");
-      expect(allowedPreviewPayload.preview.open_target.path).toContain("/browse?");
+      expect(allowedPreviewPayload.preview.open_target.path).toContain("/browse/source?");
     } finally {
       await stopHttpServer(server);
     }
@@ -2207,6 +2298,631 @@ describe("Story 1.2 RAG backend", () => {
     } finally {
       await stopHttpServer(server);
     }
+  });
+
+  it("launch-quality gate: evaluates the Phase 1 launch scenarios with telemetry-backed launch metrics", async () => {
+    const runtime = await createTestRuntime({
+      ASSISTANT_EMBEDDING_URL: "https://embeddings.test/v1/embeddings",
+      ASSISTANT_ANSWER_URL: "https://answers.test/v1/chat/completions",
+    });
+    cleanups.push(runtime.cleanup);
+
+    let serverBaseUrl: string | null = null;
+    const originalFetch = globalThis.fetch.bind(globalThis);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+
+      if (serverBaseUrl && url.startsWith(serverBaseUrl)) {
+        return originalFetch(input, init);
+      }
+
+      if (url === "https://embeddings.test/v1/embeddings") {
+        const body = typeof init?.body === "string"
+          ? JSON.parse(init.body) as { input?: string[] | string }
+          : {};
+        const inputs = Array.isArray(body.input)
+          ? body.input
+          : typeof body.input === "string"
+            ? [body.input]
+            : [];
+
+        return buildJsonResponse({
+          data: inputs.map((text) => ({
+            embedding: buildEmbedding(resolveMockEmbeddingIndex(text)),
+          })),
+        });
+      }
+
+      if (url === "https://answers.test/v1/chat/completions") {
+        return buildJsonResponse(buildAnswerProviderPayload([
+          {
+            text: "The medical college has NABH accreditation for patient care, infrastructure, and clinical outcomes.",
+            citations: ["S1"],
+          },
+        ]));
+      }
+
+      return originalFetch(input, init);
+    });
+
+    const indexModule = await import("../../index.js");
+    await indexModule.prepareApiRuntime();
+    await drainKnowledgeJobs(runtime.modules.jobs);
+
+    const semanticEntry = await createIndexedEntry(runtime, {
+      title: "Project Aurora",
+      dept: "Design",
+      type: "Notice",
+      body: "Lumen graph ember slate.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["aurora"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    const distractorEntry = await createIndexedEntry(runtime, {
+      title: "Project Orchard",
+      dept: "Medical",
+      type: "Notice",
+      body: "Pebble harbor mint lantern.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "ca-001",
+      tags: ["orchard"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+    await setAssetEmbedding(runtime, semanticEntry.asset.id, buildEmbedding(0));
+    await setAssetEmbedding(runtime, distractorEntry.asset.id, buildEmbedding(1));
+
+    await createIndexedEntry(runtime, {
+      title: "Campus Wellness Update",
+      dept: "Design",
+      type: "Notice",
+      body: "This note mentions wellness activities for the semester.",
+      priority: "Normal",
+      entry_date: "2026-04-06",
+      created_by: "bu-001",
+      tags: ["wellness"],
+      author_name: "Branding User",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    const explicitEntry = await createIndexedEntry(runtime, {
+      title: "Explicit ACL Story 1.8 Q9VX Result",
+      dept: "Sciences",
+      type: "Notice",
+      body: "Explicit ACL story 1.8 q9vx result body for launch guardrail validation.",
+      priority: "High",
+      entry_date: "2026-04-06",
+      created_by: "ca-001",
+      tags: ["explicit-acl", "launch-quality", "q9vx-acl-token"],
+      author_name: "Content Admin",
+      academic_year: "2025-26",
+      student_count: null,
+      external_link: "",
+      collaborating_org: "",
+    });
+
+    await runtime.modules.db.pool.query(
+      `UPDATE knowledge_assets
+          SET visibility_scope = 'explicit_acl',
+              owner_team_id = 'content',
+              updated_at = NOW()
+        WHERE id = $1`,
+      [explicitEntry.asset.id],
+    );
+    await runtime.modules.db.pool.query(
+      `INSERT INTO knowledge_acl_principals (id, asset_id, principal_type, principal_id, permission)
+       VALUES ($1, $2, 'team', 'content', 'read')`,
+      [`acl-${explicitEntry.asset.id}`, explicitEntry.asset.id],
+    );
+
+    const sourceReference = await getSourceReference(runtime, explicitEntry.asset.id, explicitEntry.entry.id);
+    const { server, baseUrl } = await startHttpServer(indexModule.app);
+    serverBaseUrl = baseUrl;
+
+    try {
+      const superAdminCookie = await loginAndGetSessionCookie(baseUrl);
+      const brandingCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "brand-user@parul.ac.in",
+        password: "branduser123",
+      });
+      const contentCookie = await loginAndGetSessionCookie(baseUrl, {
+        email: "content-user@parul.ac.in",
+        password: "contentuser123",
+      });
+
+      const exactMatch = await postJson<{
+        result: {
+          total_results: number;
+          results: Array<{ title: string }>;
+          request_id: string;
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/query",
+        superAdminCookie,
+        {
+          query: {
+            mode: "search",
+            text: "NABH accreditation",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        },
+      );
+
+      expect(exactMatch.response.ok).toBe(true);
+      expect(exactMatch.payload.result.total_results).toBeGreaterThan(0);
+      expect(
+        exactMatch.payload.result.results.slice(0, 5).some((result) => result.title.includes("NABH")),
+      ).toBe(true);
+
+      const groundedAsk = await postJson<{
+        result: {
+          grounded: boolean;
+          enough_evidence: boolean;
+          answer: string | null;
+          citations: Array<{ label: string; title: string }>;
+          results: Array<{ title: string }>;
+          request_id: string;
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/query",
+        superAdminCookie,
+        {
+          query: {
+            mode: "ask",
+            text: "Summarize what Nerve says about NABH accreditation.",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        },
+      );
+
+      expect(groundedAsk.response.ok).toBe(true);
+      expect(groundedAsk.payload.result.grounded).toBe(true);
+      expect(groundedAsk.payload.result.enough_evidence).toBe(true);
+      expect(groundedAsk.payload.result.answer).toContain("[S1]");
+      expect(groundedAsk.payload.result.citations).toHaveLength(1);
+      expect(groundedAsk.payload.result.results.length).toBeGreaterThan(0);
+
+      const semanticSearch = await postJson<{
+        result: {
+          results: Array<{ title: string }>;
+          request_id: string;
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/query",
+        superAdminCookie,
+        {
+          query: {
+            mode: "search",
+            text: "semantic-aurora-intent",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        },
+      );
+
+      expect(semanticSearch.response.ok).toBe(true);
+      expect(semanticSearch.payload.result.results[0]?.title).toBe("Project Aurora");
+
+      const noAnswer = await postJson<{
+        result: {
+          grounded: boolean;
+          enough_evidence: boolean;
+          answer: string | null;
+          follow_up_suggestions: string[];
+          request_id: string;
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/query",
+        superAdminCookie,
+        {
+          query: {
+            mode: "ask",
+            text: "Explain the campus safety escalation process.",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        },
+      );
+
+      expect(noAnswer.response.ok).toBe(true);
+      expect(noAnswer.payload.result.answer).toBeNull();
+      expect(noAnswer.payload.result.grounded).toBe(false);
+      expect(noAnswer.payload.result.enough_evidence).toBe(false);
+      expect(noAnswer.payload.result.follow_up_suggestions[0]).toMatch(/sources available to you/i);
+
+      const blockedQuery = await postJson<{
+        result: {
+          results: Array<{ title: string }>;
+          citations: Array<{ title: string }>;
+          request_id: string;
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/query",
+        brandingCookie,
+        {
+          query: {
+            mode: "search",
+            text: "q9vx-acl-token",
+            filters: {
+              departments: [],
+              entry_types: [],
+              priorities: [],
+              tags: [],
+            },
+          },
+        },
+      );
+
+      expect(blockedQuery.response.ok).toBe(true);
+      expect(
+        blockedQuery.payload.result.results.some((result) => result.title.includes("Explicit ACL Story 1.8 Q9VX Result")),
+      ).toBe(false);
+      expect(
+        blockedQuery.payload.result.citations.some((citation) => citation.title.includes("Explicit ACL Story 1.8 Q9VX Result")),
+      ).toBe(false);
+
+      const blockedPreview = await postJson<{ message: string }>(
+        baseUrl,
+        "/api/assistant/source-preview",
+        brandingCookie,
+        {
+          preview: {
+            source: sourceReference,
+          },
+        },
+      );
+
+      expect(blockedPreview.response.status).toBe(403);
+      expect(blockedPreview.payload.message).toBe("You are not authorized to access that source.");
+      expect(JSON.stringify(blockedPreview.payload)).not.toContain("Explicit ACL Story 1.8 Q9VX Result");
+
+      const blockedOpen = await postJson<{ message: string }>(
+        baseUrl,
+        "/api/assistant/source-open",
+        brandingCookie,
+        {
+          open: {
+            source: sourceReference,
+          },
+        },
+      );
+
+      expect(blockedOpen.response.status).toBe(403);
+      expect(blockedOpen.payload.message).toBe("You are not authorized to access that source.");
+      expect(JSON.stringify(blockedOpen.payload)).not.toContain("Explicit ACL Story 1.8 Q9VX Result");
+
+      const allowedPreview = await postJson<{
+        preview: {
+          title: string;
+          excerpt: string;
+          open_target: { path: string };
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/source-preview",
+        contentCookie,
+        {
+          preview: {
+            source: sourceReference,
+          },
+        },
+      );
+
+      expect(allowedPreview.response.ok).toBe(true);
+      expect(allowedPreview.payload.preview.title).toContain("Explicit ACL Story 1.8 Q9VX Result");
+      expect(allowedPreview.payload.preview.excerpt).toContain("launch guardrail validation");
+
+      const allowedOpen = await postJson<{
+        open: {
+          target: { path: string };
+        };
+      }>(
+        baseUrl,
+        "/api/assistant/source-open",
+        contentCookie,
+        {
+          open: {
+            source: sourceReference,
+          },
+        },
+      );
+
+      expect(allowedOpen.response.ok).toBe(true);
+      expect(allowedOpen.payload.open.target.path).toContain("/browse/source?");
+
+      const launchSummary = await runtime.modules.metrics.getAssistantLaunchSummary();
+      expect(launchSummary.action_counts.query_request_count).toBe(5);
+      expect(launchSummary.action_counts.source_preview_request_count).toBe(2);
+      expect(launchSummary.action_counts.source_open_request_count).toBe(2);
+      expect(launchSummary.action_counts.denied_source_request_count).toBe(2);
+      expect(launchSummary.request_mix.search_request_count).toBe(3);
+      expect(launchSummary.request_mix.ask_request_count).toBe(2);
+      expect(launchSummary.quality_metrics.citation_coverage_rate).toBe(1);
+      expect(launchSummary.quality_metrics.no_answer_rate).toBe(0.5);
+      expect(launchSummary.latency.search.sample_count).toBe(3);
+      expect(launchSummary.latency.ask.sample_count).toBe(2);
+      expect(launchSummary.outcome_counts.grounded_answer_count).toBe(1);
+      expect(launchSummary.outcome_counts.no_answer_count).toBe(1);
+      expect(launchSummary.outcome_counts.permission_denied_count).toBe(2);
+      expect(launchSummary.outcome_counts.request_failed_count).toBe(0);
+
+      const evaluation = buildLaunchEvaluationSummary(launchSummary, [
+        {
+          category: "exact-match search",
+          passed: exactMatch.payload.result.results.slice(0, 5).some((result) => result.title.includes("NABH")),
+          blocker: "Exact-match launch evaluation did not keep the intended entry inside the top five results.",
+        },
+        {
+          category: "grounded answer citations",
+          passed: groundedAsk.payload.result.grounded
+            && groundedAsk.payload.result.answer?.includes("[S1]") === true
+            && groundedAsk.payload.result.citations.length > 0,
+          blocker: "Grounded-answer launch evaluation detected a substantive answer without citation coverage.",
+        },
+        {
+          category: "semantic retrieval",
+          passed: semanticSearch.payload.result.results[0]?.title === "Project Aurora",
+          blocker: "Semantic launch evaluation failed to retrieve the intended entry when wording diverged.",
+        },
+        {
+          category: "no-answer abstention",
+          passed: noAnswer.payload.result.answer === null
+            && !noAnswer.payload.result.grounded
+            && !noAnswer.payload.result.enough_evidence,
+          blocker: "No-answer launch evaluation produced unsupported narrative content instead of abstaining.",
+        },
+        {
+          category: "ACL-sensitive flows",
+          passed: !blockedQuery.payload.result.results.some((result) => (
+            result.title.includes("Explicit ACL Story 1.8 Q9VX Result")
+          ))
+            && !blockedQuery.payload.result.citations.some((citation) => (
+              citation.title.includes("Explicit ACL Story 1.8 Q9VX Result")
+            ))
+            && blockedPreview.response.status === 403
+            && blockedOpen.response.status === 403
+            && !JSON.stringify(blockedPreview.payload).includes("Explicit ACL Story 1.8 Q9VX Result")
+            && !JSON.stringify(blockedOpen.payload).includes("Explicit ACL Story 1.8 Q9VX Result")
+            && allowedPreview.response.ok
+            && allowedOpen.response.ok,
+          blocker: "ACL-sensitive launch evaluation detected blocked-source leakage or an unexpected permission bypass.",
+        },
+      ]);
+
+      expect(evaluation.launch_ready).toBe(true);
+      expect(evaluation.blockers).toEqual([]);
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
+  it("launch-quality gate: summarizes citation coverage, request mix, and p95 timing slices deterministically", async () => {
+    const runtime = await createTestRuntime();
+    cleanups.push(runtime.cleanup);
+
+    await runtime.modules.db.bootstrapDatabase();
+    await runtime.modules.ragDb.runRagMigrations();
+
+    const requestIds = [
+      "launch-search-1",
+      "launch-search-2",
+      "launch-ask-1",
+      "launch-ask-2",
+      "launch-ask-3",
+      "launch-preview-1",
+    ];
+    const filterSummary = {
+      department: null,
+      sort: "relevance" as const,
+      has_date_start: false,
+      has_date_end: false,
+    };
+
+    await runtime.modules.metrics.recordAssistantRequestTelemetry({
+      requestId: requestIds[0]!,
+      action: "query",
+      actor: SUPER_ADMIN_ACTOR,
+      requestedMode: "search",
+      resolvedMode: "search",
+      authorizationOutcome: "allowed",
+      outcome: "search_results",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: false,
+      enoughEvidence: true,
+      noAnswer: false,
+      resultCount: 3,
+      citationCount: 0,
+      filterSummary,
+      stageTimings: { total_ms: 1500 },
+      providerMetadata: runtime.modules.metrics.defaultProviderMetadata(),
+      metadata: {},
+    });
+    await runtime.modules.metrics.recordAssistantRequestTelemetry({
+      requestId: requestIds[1]!,
+      action: "query",
+      actor: SUPER_ADMIN_ACTOR,
+      requestedMode: "search",
+      resolvedMode: "search",
+      authorizationOutcome: "allowed",
+      outcome: "search_results",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: false,
+      enoughEvidence: true,
+      noAnswer: false,
+      resultCount: 2,
+      citationCount: 0,
+      filterSummary,
+      stageTimings: { total_ms: 2600 },
+      providerMetadata: runtime.modules.metrics.defaultProviderMetadata(),
+      metadata: {},
+    });
+    await runtime.modules.metrics.recordAssistantRequestTelemetry({
+      requestId: requestIds[2]!,
+      action: "query",
+      actor: SUPER_ADMIN_ACTOR,
+      requestedMode: "ask",
+      resolvedMode: "ask",
+      authorizationOutcome: "allowed",
+      outcome: "grounded_answer",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: true,
+      enoughEvidence: true,
+      noAnswer: false,
+      resultCount: 1,
+      citationCount: 1,
+      filterSummary,
+      stageTimings: { total_ms: 7000 },
+      providerMetadata: runtime.modules.metrics.defaultProviderMetadata(),
+      metadata: {},
+    });
+    await runtime.modules.metrics.recordAssistantRequestTelemetry({
+      requestId: requestIds[3]!,
+      action: "query",
+      actor: SUPER_ADMIN_ACTOR,
+      requestedMode: "ask",
+      resolvedMode: "ask",
+      authorizationOutcome: "allowed",
+      outcome: "grounded_answer",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: true,
+      enoughEvidence: true,
+      noAnswer: false,
+      resultCount: 1,
+      citationCount: 0,
+      filterSummary,
+      stageTimings: { total_ms: 8100 },
+      providerMetadata: runtime.modules.metrics.defaultProviderMetadata(),
+      metadata: {},
+    });
+    await runtime.modules.metrics.recordAssistantRequestTelemetry({
+      requestId: requestIds[4]!,
+      action: "query",
+      actor: SUPER_ADMIN_ACTOR,
+      requestedMode: "ask",
+      resolvedMode: "ask",
+      authorizationOutcome: "allowed",
+      outcome: "no_answer",
+      failureClassification: "none",
+      failureSubtype: null,
+      grounded: false,
+      enoughEvidence: false,
+      noAnswer: true,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary,
+      stageTimings: { total_ms: 9000 },
+      providerMetadata: runtime.modules.metrics.defaultProviderMetadata(),
+      metadata: {},
+    });
+    await runtime.modules.metrics.recordAssistantRequestTelemetry({
+      requestId: requestIds[5]!,
+      action: "source-preview",
+      actor: SUPER_ADMIN_ACTOR,
+      requestedMode: null,
+      resolvedMode: null,
+      authorizationOutcome: "denied",
+      outcome: "permission_denied",
+      failureClassification: "permission_failure",
+      failureSubtype: "source_preview_denied",
+      grounded: false,
+      enoughEvidence: false,
+      noAnswer: false,
+      resultCount: 0,
+      citationCount: 0,
+      filterSummary: null,
+      stageTimings: { total_ms: 50 },
+      providerMetadata: runtime.modules.metrics.defaultProviderMetadata(),
+      metadata: {},
+    });
+
+    const summary = await runtime.modules.metrics.getAssistantLaunchSummary({ requestIds });
+
+    expect(summary.request_ids).toEqual(requestIds);
+    expect(summary.action_counts.total_request_count).toBe(6);
+    expect(summary.action_counts.query_request_count).toBe(5);
+    expect(summary.action_counts.source_preview_request_count).toBe(1);
+    expect(summary.action_counts.denied_source_request_count).toBe(1);
+    expect(summary.request_mix.search_request_count).toBe(2);
+    expect(summary.request_mix.ask_request_count).toBe(3);
+    expect(summary.request_mix.search_share).toBe(0.4);
+    expect(summary.request_mix.ask_share).toBe(0.6);
+    expect(summary.quality_metrics.citation_coverage_rate).toBe(0.5);
+    expect(summary.quality_metrics.grounded_answer_with_citations_count).toBe(1);
+    expect(summary.quality_metrics.no_answer_rate).toBe(0.3333);
+    expect(summary.latency.search.p95_ms).toBe(2600);
+    expect(summary.latency.search.within_target).toBe(false);
+    expect(summary.latency.ask.p95_ms).toBe(9000);
+    expect(summary.latency.ask.within_target).toBe(false);
+    expect(summary.outcome_counts.search_results_count).toBe(2);
+    expect(summary.outcome_counts.grounded_answer_count).toBe(2);
+    expect(summary.outcome_counts.no_answer_count).toBe(1);
+    expect(summary.outcome_counts.permission_denied_count).toBe(1);
+    expect(summary.outcome_counts.request_failed_count).toBe(0);
+
+    const evaluation = buildLaunchEvaluationSummary(summary, [
+      {
+        category: "exact-match search",
+        passed: true,
+        blocker: "Exact-match launch evaluation did not keep the intended entry inside the top five results.",
+      },
+      {
+        category: "grounded answer citations",
+        passed: true,
+        blocker: "Grounded-answer launch evaluation detected a substantive answer without citation coverage.",
+      },
+    ]);
+
+    expect(evaluation.launch_ready).toBe(false);
+    expect(evaluation.blockers).toContain(
+      "Launch telemetry summary shows search p95 latency 2600 ms above target 2500 ms.",
+    );
+    expect(evaluation.blockers).toContain(
+      "Launch telemetry summary shows ask p95 latency 9000 ms above target 8000 ms.",
+    );
   });
 
   it("removes deleted entries from assistant search results", async () => {

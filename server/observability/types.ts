@@ -128,3 +128,60 @@ export interface AssistantOperationalSnapshot {
   oldest_inflight_job_age_minutes: number;
   max_ready_version_age_hours: number;
 }
+
+export interface AssistantLaunchSummaryOptions {
+  hours?: number;
+  requestIds?: string[];
+}
+
+export interface AssistantLaunchActionCounts {
+  total_request_count: number;
+  query_request_count: number;
+  source_preview_request_count: number;
+  source_open_request_count: number;
+  denied_source_request_count: number;
+}
+
+export interface AssistantLaunchRequestMix {
+  total_query_count: number;
+  search_request_count: number;
+  ask_request_count: number;
+  search_share: number | null;
+  ask_share: number | null;
+}
+
+export interface AssistantLaunchQualityMetrics {
+  citation_coverage_rate: number | null;
+  grounded_answer_with_citations_count: number;
+  no_answer_rate: number | null;
+}
+
+export interface AssistantLaunchLatencySummary {
+  sample_count: number;
+  p95_ms: number | null;
+  target_ms: number;
+  within_target: boolean | null;
+}
+
+export interface AssistantLaunchOutcomeCounts {
+  search_results_count: number;
+  grounded_answer_count: number;
+  no_answer_count: number;
+  provider_fallback_count: number;
+  permission_denied_count: number;
+  request_failed_count: number;
+}
+
+export interface AssistantLaunchSummary {
+  generated_at: string;
+  window_hours: number | null;
+  request_ids: string[] | null;
+  action_counts: AssistantLaunchActionCounts;
+  request_mix: AssistantLaunchRequestMix;
+  quality_metrics: AssistantLaunchQualityMetrics;
+  latency: {
+    search: AssistantLaunchLatencySummary;
+    ask: AssistantLaunchLatencySummary;
+  };
+  outcome_counts: AssistantLaunchOutcomeCounts;
+}

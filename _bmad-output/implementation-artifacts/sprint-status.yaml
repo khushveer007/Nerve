@@ -1,5 +1,5 @@
 # generated: 2026-04-05T17:41:31+05:30
-# last_updated: 2026-04-06T09:25:31+05:30
+# last_updated: 2026-04-07T07:48:40+05:30
 # project: Nerve
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-05T17:41:31+05:30
-last_updated: 2026-04-07T06:39:05+05:30
+last_updated: 2026-04-07T07:48:40+05:30
 project: Nerve
 project_key: NOKEY
 tracking_system: file-system
@@ -51,7 +51,7 @@ development_status:
   1-5-deliver-grounded-ask-mode-with-server-enforced-no-answer-behavior: done
   1-6-add-citation-inspection-and-entry-evidence-verification: done
   1-7-add-phase-1-telemetry-and-failure-classification: done
-  1-8-add-phase-1-evaluation-and-launch-guardrails: backlog
+  1-8-add-phase-1-evaluation-and-launch-guardrails: done
   epic-1-retrospective: optional
   epic-2: backlog
   2-1-add-role-gated-private-source-uploads: backlog

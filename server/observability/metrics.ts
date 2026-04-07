@@ -14,6 +14,8 @@ import {
 import { emitObservabilityEvent, emitObservabilityWriteFailure } from "./logger.js";
 import type {
   AssistantFailureDescriptor,
+  AssistantLaunchSummary,
+  AssistantLaunchSummaryOptions,
   AssistantJobTelemetryEvent,
   AssistantOperationalSnapshot,
   AssistantProviderMetadata,
@@ -29,6 +31,35 @@ function generateTelemetryId(prefix: string) {
 
 function roundDuration(value: number) {
   return Math.max(0, Math.round(value));
+}
+
+function roundRate(value: number) {
+  return Math.round(value * 10_000) / 10_000;
+}
+
+function buildLaunchSummaryScope(options: AssistantLaunchSummaryOptions = {}) {
+  const params: Array<number | string[]> = [];
+  const conditions: string[] = [];
+
+  let safeHours: number | null = null;
+  if (typeof options.hours === "number" && Number.isFinite(options.hours)) {
+    safeHours = Math.max(1, Math.min(Math.round(options.hours), 24 * 30));
+    params.push(safeHours);
+    conditions.push(`created_at >= NOW() - make_interval(hours => $${params.length})`);
+  }
+
+  const requestIds = options.requestIds?.filter((requestId) => requestId.trim().length > 0) ?? [];
+  if (requestIds.length > 0) {
+    params.push(requestIds);
+    conditions.push(`request_id = ANY($${params.length}::text[])`);
+  }
+
+  return {
+    params,
+    safeHours,
+    requestIds: requestIds.length > 0 ? requestIds : null,
+    whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "",
+  };
 }
 
 function createProviderSignal(configured: boolean, model: string | null): AssistantProviderSignal {
@@ -356,6 +387,136 @@ export async function getAssistantOperationalSnapshot(hours = 24): Promise<Assis
     assets_needing_attention: operations.rows[0]?.assets_needing_attention ?? 0,
     oldest_inflight_job_age_minutes: operations.rows[0]?.oldest_inflight_job_age_minutes ?? 0,
     max_ready_version_age_hours: operations.rows[0]?.max_ready_version_age_hours ?? 0,
+  };
+}
+
+export async function getAssistantLaunchSummary(
+  options: AssistantLaunchSummaryOptions = {},
+): Promise<AssistantLaunchSummary> {
+  const scope = buildLaunchSummaryScope(options);
+
+  const result = await pool.query<{
+    total_request_count: number;
+    query_request_count: number;
+    source_preview_request_count: number;
+    source_open_request_count: number;
+    denied_source_request_count: number;
+    search_request_count: number;
+    ask_request_count: number;
+    search_results_count: number;
+    grounded_answer_count: number;
+    grounded_answer_with_citations_count: number;
+    no_answer_count: number;
+    provider_fallback_count: number;
+    permission_denied_count: number;
+    request_failed_count: number;
+    search_latency_p95_ms: number | null;
+    ask_latency_p95_ms: number | null;
+  }>(
+    `WITH filtered AS (
+      SELECT *
+        FROM assistant_request_telemetry
+        ${scope.whereClause}
+    )
+    SELECT
+      COUNT(*)::int AS total_request_count,
+      COUNT(*) FILTER (WHERE action = 'query')::int AS query_request_count,
+      COUNT(*) FILTER (WHERE action = 'source-preview')::int AS source_preview_request_count,
+      COUNT(*) FILTER (WHERE action = 'source-open')::int AS source_open_request_count,
+      COUNT(*) FILTER (
+        WHERE action IN ('source-preview', 'source-open')
+          AND authorization_outcome = 'denied'
+      )::int AS denied_source_request_count,
+      COUNT(*) FILTER (WHERE action = 'query' AND resolved_mode = 'search')::int AS search_request_count,
+      COUNT(*) FILTER (WHERE action = 'query' AND resolved_mode = 'ask')::int AS ask_request_count,
+      COUNT(*) FILTER (WHERE action = 'query' AND outcome = 'search_results')::int AS search_results_count,
+      COUNT(*) FILTER (WHERE action = 'query' AND outcome = 'grounded_answer')::int AS grounded_answer_count,
+      COUNT(*) FILTER (
+        WHERE action = 'query'
+          AND outcome = 'grounded_answer'
+          AND citation_count > 0
+      )::int AS grounded_answer_with_citations_count,
+      COUNT(*) FILTER (WHERE action = 'query' AND no_answer = true)::int AS no_answer_count,
+      COUNT(*) FILTER (WHERE outcome = 'provider_fallback')::int AS provider_fallback_count,
+      COUNT(*) FILTER (WHERE outcome = 'permission_denied')::int AS permission_denied_count,
+      COUNT(*) FILTER (WHERE outcome = 'request_failed')::int AS request_failed_count,
+      ROUND(
+        percentile_disc(0.95) WITHIN GROUP (ORDER BY (stage_timings->>'total_ms')::numeric)
+        FILTER (
+          WHERE action = 'query'
+            AND resolved_mode = 'search'
+            AND stage_timings ? 'total_ms'
+        )
+      )::int AS search_latency_p95_ms,
+      ROUND(
+        percentile_disc(0.95) WITHIN GROUP (ORDER BY (stage_timings->>'total_ms')::numeric)
+        FILTER (
+          WHERE action = 'query'
+            AND resolved_mode = 'ask'
+            AND stage_timings ? 'total_ms'
+        )
+      )::int AS ask_latency_p95_ms
+    FROM filtered`,
+    scope.params,
+  );
+
+  const row = result.rows[0];
+  const totalQueryCount = row?.query_request_count ?? 0;
+  const searchRequestCount = row?.search_request_count ?? 0;
+  const askRequestCount = row?.ask_request_count ?? 0;
+  const groundedAnswerCount = row?.grounded_answer_count ?? 0;
+  const groundedAnswerWithCitationsCount = row?.grounded_answer_with_citations_count ?? 0;
+  const noAnswerCount = row?.no_answer_count ?? 0;
+  const searchLatencyP95 = row?.search_latency_p95_ms ?? null;
+  const askLatencyP95 = row?.ask_latency_p95_ms ?? null;
+
+  return {
+    generated_at: new Date().toISOString(),
+    window_hours: scope.safeHours,
+    request_ids: scope.requestIds,
+    action_counts: {
+      total_request_count: row?.total_request_count ?? 0,
+      query_request_count: totalQueryCount,
+      source_preview_request_count: row?.source_preview_request_count ?? 0,
+      source_open_request_count: row?.source_open_request_count ?? 0,
+      denied_source_request_count: row?.denied_source_request_count ?? 0,
+    },
+    request_mix: {
+      total_query_count: totalQueryCount,
+      search_request_count: searchRequestCount,
+      ask_request_count: askRequestCount,
+      search_share: totalQueryCount > 0 ? roundRate(searchRequestCount / totalQueryCount) : null,
+      ask_share: totalQueryCount > 0 ? roundRate(askRequestCount / totalQueryCount) : null,
+    },
+    quality_metrics: {
+      citation_coverage_rate: groundedAnswerCount > 0
+        ? roundRate(groundedAnswerWithCitationsCount / groundedAnswerCount)
+        : null,
+      grounded_answer_with_citations_count: groundedAnswerWithCitationsCount,
+      no_answer_rate: askRequestCount > 0 ? roundRate(noAnswerCount / askRequestCount) : null,
+    },
+    latency: {
+      search: {
+        sample_count: searchRequestCount,
+        p95_ms: searchLatencyP95,
+        target_ms: 2500,
+        within_target: searchLatencyP95 === null ? null : searchLatencyP95 <= 2500,
+      },
+      ask: {
+        sample_count: askRequestCount,
+        p95_ms: askLatencyP95,
+        target_ms: 8000,
+        within_target: askLatencyP95 === null ? null : askLatencyP95 <= 8000,
+      },
+    },
+    outcome_counts: {
+      search_results_count: row?.search_results_count ?? 0,
+      grounded_answer_count: groundedAnswerCount,
+      no_answer_count: noAnswerCount,
+      provider_fallback_count: row?.provider_fallback_count ?? 0,
+      permission_denied_count: row?.permission_denied_count ?? 0,
+      request_failed_count: row?.request_failed_count ?? 0,
+    },
   };
 }
 
