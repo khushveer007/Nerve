@@ -1105,7 +1105,7 @@ export interface MemberReportStatus {
   has_submitted: boolean;
 }
 
-export async function getTeamReportStatus(date: string): Promise<MemberReportStatus[]> {
+export async function getTeamReportStatus(date: string, managedBy: string | null): Promise<MemberReportStatus[]> {
   const result = await pool.query<{
     id: string; full_name: string; email: string; role: string;
     is_locked: boolean | null;
@@ -1117,8 +1117,9 @@ export async function getTeamReportStatus(date: string): Promise<MemberReportSta
        ON dr.user_id = u.id AND dr.report_date = $1::date
      WHERE u.team = 'branding'
        AND u.role IN ('user', 'sub_admin')
+       AND ($2::uuid IS NULL OR u.managed_by = $2::uuid OR u.id = $2::uuid)
      ORDER BY u.role DESC, u.full_name ASC`,
-    [date]
+    [date, managedBy]
   );
   return result.rows.map(r => ({
     user_id: r.id,

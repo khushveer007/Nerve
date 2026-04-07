@@ -123,8 +123,8 @@ export default function AppSidebar() {
   const location = useLocation()
   const isActive = (path: string) => location.pathname === path
 
-  // Branding users have their own full internal sidebar — hide the global one
-  if (role === 'user' && team === 'branding') return null
+  // Branding users and leads have their own full internal sidebar — hide the global one
+  if (team === 'branding' && (role === 'user' || role === 'sub_admin')) return null
 
   const key = `${role ?? ''}:${team ?? ''}`
   const config = SIDEBAR[key] ?? FALLBACK
